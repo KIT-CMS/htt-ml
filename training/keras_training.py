@@ -187,7 +187,7 @@ def main(args, config):
     model_impl = getattr(keras_models, config["model"]["name"])
     model = model_impl(len(variables), len(classes))
     model.summary()
-    model.fit(
+    fitResults = model.fit(
         x_train,
         y_train,
         sample_weight=w_train,
@@ -201,6 +201,9 @@ def main(args, config):
     if not "save_best_only" in config["model"]:
         logger.info("Write model to %s.", path_model)
         model.save(path_model)
+
+    with open(path_model[:-3]+"_history.pkl", "wb") as file:
+      pickle.dump(fitResults.history, file)
 
 
 if __name__ == "__main__":
