@@ -202,8 +202,8 @@ def main(args, config):
         logger.info("Write model to %s.", path_model)
         model.save(path_model)
 
-    with open(path_model[:-3]+"_history.pkl", "wb") as file:
-      pickle.dump(fitResults.history, file)
+    with open(path_model[:-3] + "_history.pkl", "wb") as file:
+        pickle.dump(fitResults.history, file)
 
 
 if __name__ == "__main__":
