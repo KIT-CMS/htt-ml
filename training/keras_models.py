@@ -169,7 +169,7 @@ def smhtt_dropout_relu(num_inputs, num_outputs):
     model.compile(loss="categorical_crossentropy", optimizer=Adam(lr=2e-2, decay=0.01))
     return model
 
-def smhtt_significance(num_inputs, num_outputs):
+def smhtt_significance(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
     inputs = Input(shape=(num_inputs,))
     weights = Input(shape=(1,))
 
@@ -181,27 +181,27 @@ def smhtt_significance(num_inputs, num_outputs):
     layer_2 = BatchNormalization()(layer_2)
     layer_2 = Activation('relu')(layer_2)
     #layer_2 = Dropout(rate=0.3)(layer_2)
-    output_ggh = Dense(num_outputs, activation=None, kernel_regularizer=None, name=None)(layer_2)
-    output_ggh = BatchNormalization(name=None)(output_ggh)
-    output_ggh = Activation('softmax', name='ggh')(output_ggh)
-    output_qqh = Lambda(lambda x: x, name='qqh')(output_ggh)
-    output_ztt = Lambda(lambda x: x, name='ztt')(output_ggh)
-    output_noniso = Lambda(lambda x: x, name='noniso')(output_ggh)
-    output_misc = Lambda(lambda x: x, name='misc')(output_ggh)
+    output_list = []
+    for i, name in enumerate(output_names):
+        if i == 0:
+            output_0 = Dense(num_outputs, activation=None, kernel_regularizer=None, name="dense_{}".format(name))(layer_2)
+            output_0 = BatchNormalization(name='batchnorm_{}'.format(name))(output_0)
+            output_0 = Activation('softmax', name=name)(output_0)
+            output_list.append(output_0)
+            continue
+        new_output = Lambda(lambda x: x, name=name)(output_list[0])
+        output_list.append(new_output)
 
-    model = Model(inputs=[inputs, weights], outputs=[output_ggh, output_qqh, output_ztt, output_noniso, output_misc])
+    model = Model(inputs=[inputs, weights], outputs=output_list)
 
     loss_dict = dict()
-    loss_dict['ggh'] = wrapped_partial(curry_loss_2(class_label=0), weights=weights)
-    loss_dict['qqh'] = wrapped_partial(curry_loss_2(class_label=1), weights=weights)
-    loss_dict['ztt'] = wrapped_partial(curry_loss_2(class_label=2), weights=weights)
-    loss_dict['noniso'] = wrapped_partial(curry_loss_2(class_label=3), weights=weights)
-    loss_dict['misc'] = wrapped_partial(curry_loss_2(class_label=4), weights=weights)
+    for i, name in enumerate(output_names):
+        loss_dict[name] = wrapped_partial(significance_curry_loss(class_label=i), weights=weights)
 
-    model.compile(loss=loss_dict, optimizer=Adam(lr=1e-3), loss_weights=[1.,1.,1.,1.,1.])
+    model.compile(loss=loss_dict, optimizer=Adam(lr=learning_rate), loss_weights=None)
     return model
 
-def smhtt_ams(num_inputs, num_outputs):
+def smhtt_ams(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
     inputs = Input(shape=(num_inputs,))
     weights = Input(shape=(1,))
 
@@ -213,24 +213,24 @@ def smhtt_ams(num_inputs, num_outputs):
     layer_2 = BatchNormalization()(layer_2)
     layer_2 = Activation('relu')(layer_2)
     #layer_2 = Dropout(rate=0.3)(layer_2)
-    output_ggh = Dense(num_outputs, activation=None, kernel_regularizer=None, name=None)(layer_2)
-    output_ggh = BatchNormalization()(output_ggh)
-    output_ggh = Activation('softmax', name='ggh')(output_ggh)
-    output_qqh = Lambda(lambda x: x, name='qqh')(output_ggh)
-    output_ztt = Lambda(lambda x: x, name='ztt')(output_ggh)
-    output_noniso = Lambda(lambda x: x, name='noniso')(output_ggh)
-    output_misc = Lambda(lambda x: x, name='misc')(output_ggh)
+    output_list = []
+    for i, name in enumerate(output_names):
+        if i == 0:
+            output_0 = Dense(num_outputs, activation=None, kernel_regularizer=None, name="dense_{}".format(name))(layer_2)
+            output_0 = BatchNormalization(name='batchnorm_{}'.format(name))(output_0)
+            output_0 = Activation('softmax', name=name)(output_0)
+            output_list.append(output_0)
+            continue
+        new_output = Lambda(lambda x: x, name=name)(output_list[0])
+        output_list.append(new_output)
 
-    model = Model(inputs=[inputs, weights], outputs=[output_ggh, output_qqh, output_ztt, output_noniso, output_misc])
+    model = Model(inputs=[inputs, weights], outputs=output_list)
 
     loss_dict = dict()
-    loss_dict['ggh'] = wrapped_partial(ams_curry_loss(class_label=0), weights=weights)
-    loss_dict['qqh'] = wrapped_partial(ams_curry_loss(class_label=1), weights=weights)
-    loss_dict['ztt'] = wrapped_partial(ams_curry_loss(class_label=2), weights=weights)
-    loss_dict['noniso'] = wrapped_partial(ams_curry_loss(class_label=3), weights=weights)
-    loss_dict['misc'] = wrapped_partial(ams_curry_loss(class_label=4), weights=weights)
+    for i, name in enumerate(output_names):
+        loss_dict[name] = wrapped_partial(ams_curry_loss(class_label=i), weights=weights)
 
-    model.compile(loss=loss_dict, optimizer=Adam(lr=1e-3), loss_weights=[1.,1.,1.,1.,1.])
+    model.compile(loss=loss_dict, optimizer=Adam(lr=learning_rate), loss_weights=None)
     return model
 
 

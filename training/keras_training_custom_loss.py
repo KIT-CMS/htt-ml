@@ -292,14 +292,25 @@ def main(args, config):
     else:
         batch_size = config["model"]["batch_size"]
 
+    if config['model']['learning_rate'] < 1:
+        learning_rate = config['model']['learning_rate']
+    else:
+        learning_rate = 1e-3
+
+    # Adding up a list of y_train due to multiple losses
+    y_train_list = []
+    y_test_list = []
+    for class_ in classes:
+        y_train_list.append(y_train)
+        y_test_list.append(y_test)
+
     model_impl = getattr(keras_models, config["model"]["name"])
-    model = model_impl(len(variables), len(classes))
+    model = model_impl(len(variables), len(classes), classes, learning_rate)
     model.summary()
     history = model.fit(
         [x_train, w_train],
-        [y_train, y_train, y_train, y_train, y_train],
-        validation_data=([x_test, w_test], [y_test, y_test, y_test, y_test, y_test]),
-        #batch_size= np.shape(x_train)[0],
+        y_train_list,
+        validation_data=([x_test, w_test], y_test_list),
         batch_size=batch_size,
         nb_epoch=config["model"]["epochs"],
         shuffle=True,
@@ -307,7 +318,9 @@ def main(args, config):
 
     # Plot metrics
 
-    variable_names = ["ggh_loss", "qqh_loss", "ztt_loss", "noniso_loss", "misc_loss"]
+    variable_names = []
+    for class_ in classes:
+        variable_names.append('{}_loss'.format(class_))
 
     draw_validation_losses(variable_names,history, y_label='Loss', number_of_inputs=len(variables))
     draw_training_losses(variable_names, history, y_label='Loss', number_of_inputs=len(variables))
