@@ -54,7 +54,7 @@ def draw_plots(variable_name, history, y_label, number_of_inputs):
     plt.plot(
         epochs, history.history["val_{}".format(variable_name)], lw=3, label="Validation {}".format(variable_name))
     plt.xlabel("Epoch"), plt.ylabel(y_label)
-    path_plot = os.path.join(config["output_path_json"],
+    path_plot = os.path.join(config["output_path"],
                              "fold{}_{}_{}variables".format(args.fold, variable_name, number_of_inputs))
     plt.legend()
     plt.savefig(path_plot+".png", bbox_inches="tight")
@@ -84,7 +84,7 @@ def draw_custom_callbacks(metric_data, metric_names, variables, y_labels, number
             plt.plot(epochs, list_of_metrics[metric_name][variable_name], lw=3, label="{}".format(variable_name))
         plt.xlabel("Epoch"), plt.ylabel(label_name)
         plt.title("Validation score for {}".format(label_name))
-        path_plot = os.path.join(config["output_path_json"],
+        path_plot = os.path.join(config["output_path"],
                                  "fold{}_{}_{}variables".format(args.fold, metric_name, number_of_inputs))
         plt.legend()
         plt.savefig(path_plot+".png", bbox_inches="tight")
