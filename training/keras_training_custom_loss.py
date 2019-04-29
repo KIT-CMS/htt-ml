@@ -7,11 +7,7 @@ import argparse
 import yaml
 import os
 import pickle
-from keras.callbacks import Callback
-import numpy as np
-from sklearn.metrics import precision_score, recall_score, f1_score
-
-from keras_custom_metrics import Recall_Precision
+from keras_custom_metrics import *
 
 def parse_arguments():
     logger.debug("Parse arguments.")
@@ -59,6 +55,43 @@ def draw_plots(variable_name, history, y_label, number_of_inputs):
     plt.legend()
     plt.savefig(path_plot+".png", bbox_inches="tight")
     plt.savefig(path_plot+".pdf", bbox_inches="tight")
+
+
+def draw_validation_losses(variable_names, history, y_label, number_of_inputs):
+    # NOTE: Matplotlib needs to be imported after Keras/TensorFlow because of conflicting libraries
+    import matplotlib as mpl
+    mpl.use('Agg')
+    import matplotlib.pyplot as plt
+
+    plt.clf()
+    for variable_name in variable_names:
+        epochs = range(1, len(history.history[variable_name]) + 1)
+        plt.plot(
+            epochs, history.history["val_{}".format(variable_name)], lw=3, label="Validation {}".format(variable_name))
+    plt.xlabel("Epoch"), plt.ylabel(y_label)
+    path_plot = os.path.join(config["output_path_json"],
+                             "fold{}_{}_{}variables".format(args.fold, 'validation_loss', number_of_inputs))
+    plt.legend()
+    plt.savefig(path_plot + ".png", bbox_inches="tight")
+    plt.savefig(path_plot + ".pdf", bbox_inches="tight")
+
+def draw_training_losses(variable_names, history, y_label, number_of_inputs):
+    # NOTE: Matplotlib needs to be imported after Keras/TensorFlow because of conflicting libraries
+    import matplotlib as mpl
+    mpl.use('Agg')
+    import matplotlib.pyplot as plt
+
+    plt.clf()
+    for variable_name in variable_names:
+        epochs = range(1, len(history.history[variable_name]) + 1)
+        plt.plot(
+            epochs, history.history["{}".format(variable_name)], lw=3, label="Train {}".format(variable_name))
+    plt.xlabel("Epoch"), plt.ylabel(y_label)
+    path_plot = os.path.join(config["output_path_json"],
+                             "fold{}_{}_{}variables".format(args.fold, 'train_loss', number_of_inputs))
+    plt.legend()
+    plt.savefig(path_plot + ".png", bbox_inches="tight")
+    plt.savefig(path_plot + ".pdf", bbox_inches="tight")
 
 def draw_custom_callbacks(metric_data, metric_names, variables, y_labels, number_of_inputs):
     import matplotlib as mpl
@@ -124,6 +157,7 @@ def main(args, config):
         #os.mkdir(output_path_json)
         os.makedirs(output_path_json)
 
+
     # Load training dataset
     filename = config["datasets"][args.fold]
     logger.debug("Load training dataset from %s.", filename)
@@ -138,28 +172,29 @@ def main(args, config):
         if tree == None:
             logger.fatal("Tree %s not found in file %s.", class_, filename)
             raise Exception
-        friend_trees_names = [k.GetName() for k in rfile.GetListOfKeys() if "_".join([class_,"friend"]) in k.GetName()]
-        for friend in friend_trees_names:
-            tree.AddFriend(friend)
 
         # Get inputs for this class
-        x_class = np.zeros((tree.GetEntries(), len(variables)))
+        #x_class = np.zeros((tree.GetEntries(), len(variables)))
+        entries = tree.GetEntries() #if tree.GetEntries() < 8000 else 8000
+        x_class = np.zeros((entries, len(variables)))
         x_conv = root_numpy.tree2array(tree, branches=variables)
         for i_var, var in enumerate(variables):
-            x_class[:, i_var] = x_conv[var]
+            x_class[:, i_var] = x_conv[var][:entries]
         x.append(x_class)
 
         # Get weights
-        w_class = np.zeros((tree.GetEntries(), 1))
+        #w_class = np.zeros((tree.GetEntries(), 1))
+        w_class = np.zeros((entries, 1))
         w_conv = root_numpy.tree2array(
             tree, branches=[config["event_weights"]])
         w_class[:,
-                0] = w_conv[config["event_weights"]] * config["class_weights"][class_]
+                0] = w_conv[config["event_weights"]][:entries] * config["class_weights"][class_]
         w.append(w_class)
 
         # Get targets for this class
-        y_class = np.zeros((tree.GetEntries(), len(classes)))
-        y_class[:, i_class] = np.ones((tree.GetEntries()))
+        #y_class = np.zeros((tree.GetEntries(), len(classes)))
+        y_class = np.zeros((entries, len(classes)))
+        y_class[:, i_class] = np.ones((entries))
         y.append(y_class)
 
     # Stack inputs, targets and weights to a Keras-readable dataset
@@ -231,7 +266,6 @@ def main(args, config):
 
     path_model = os.path.join(config["output_path"],
                               "fold{}_keras_model.h5".format(args.fold))
-
     if "save_best_only" in config["model"]:
         if config["model"]["save_best_only"]:
             logger.info("Write best model to %s.", path_model)
@@ -244,7 +278,7 @@ def main(args, config):
         callbacks.append(
             ReduceLROnPlateau(
                 patience=config["model"]["reduce_lr_on_plateau"], verbose=1))
-    metrics = Recall_Precision()
+    metrics = significance(x_train=x_train, y_train=y_train, w_train=w_train)
     callbacks.append(metrics)
 
     # Train model
@@ -262,10 +296,10 @@ def main(args, config):
     model = model_impl(len(variables), len(classes))
     model.summary()
     history = model.fit(
-        x_train,
-        y_train,
-        sample_weight=w_train,
-        validation_data=(x_test, y_test, w_test),
+        [x_train, w_train],
+        [y_train, y_train, y_train, y_train, y_train],
+        validation_data=([x_test, w_test], [y_test, y_test, y_test, y_test, y_test]),
+        #batch_size= np.shape(x_train)[0],
         batch_size=batch_size,
         nb_epoch=config["model"]["epochs"],
         shuffle=True,
@@ -273,16 +307,14 @@ def main(args, config):
 
     # Plot metrics
 
-    metric_data = metrics.get_data()
+    variable_names = ["ggh_loss", "qqh_loss", "ztt_loss", "noniso_loss", "misc_loss"]
+
+    draw_validation_losses(variable_names,history, y_label='Loss', number_of_inputs=len(variables))
+    draw_training_losses(variable_names, history, y_label='Loss', number_of_inputs=len(variables))
 
     draw_plots(variable_name="loss", history=history, y_label="Loss", number_of_inputs=len(variables))
-    draw_custom_callbacks(metric_data=metric_data,
-                          metric_names=['F1-Score', 'Recall', 'Precision'],
-                          variables=classes,
-                          y_labels=['F1-Score', 'Recall/Efficiency', 'Precision/Purity'],
-                          number_of_inputs=len(variables))
 
-    # Save model
+
     if not "save_best_only" in config["model"]:
         logger.info("Write model to %s.", path_model)
         model.save(path_model)

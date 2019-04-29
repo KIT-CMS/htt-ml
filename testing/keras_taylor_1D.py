@@ -9,20 +9,15 @@ import yaml
 import pickle
 import numpy as np
 import os
-import sys
 
 import matplotlib as mpl
 mpl.use('Agg')
 mpl.rcParams['font.size'] = 16
 import matplotlib.pyplot as plt
-from matplotlib import cm
 
-from keras.models import load_model
 import tensorflow as tf
 
-from tensorflow_derivative.inputs import Inputs
-from tensorflow_derivative.outputs import Outputs
-from tensorflow_derivative.derivatives import Derivatives
+from tensorflow_derivative.keras_to_tensorflow import get_tensorflow_model
 
 import logging
 logger = logging.getLogger("keras_taylor_1D")
@@ -63,44 +58,15 @@ def main(args, config_test, config_train):
     logger.info("Load preprocessing %s.", path)
     preprocessing = pickle.load(open(path, "rb"))
 
-    # Load Keras model
-    path = os.path.join(config_train["output_path"],
-                        config_test["model"][args.fold])
-    logger.info("Load keras model %s.", path)
-    model_keras = load_model(path)
+    model_keras, tensorflow_model, outputs, tf_input, tf_output, dropout_name = get_tensorflow_model(args,
+                                                                                                     config_train,
+                                                                                                     config_test)
+    if dropout_name:
+        dropout = tensorflow_model.get_tensor_by_name(dropout_name)
+    input = tensorflow_model.get_tensor_by_name(tf_input)
+    output = tensorflow_model.get_tensor_by_name(tf_output)
 
-    # Get TensorFlow graph
-    inputs = Inputs(config_train["variables"])
-
-    try:
-        sys.path.append("htt-ml/training")
-        import keras_models
-    except:
-        logger.fatal("Failed to import Keras models.")
-        raise Exception
-    try:
-        name_keras_model = config_train["model"]["name"]
-        model_tensorflow_impl = getattr(
-            keras_models, config_train["model"]["name"] + "_tensorflow")
-    except:
-        logger.fatal(
-            "Failed to load TensorFlow version of Keras model {}.".format(
-                name_keras_model))
-        raise Exception
-
-    model_tensorflow = model_tensorflow_impl(inputs.placeholders, model_keras)
-    outputs = Outputs(model_tensorflow, config_train["classes"])
-
-    sess = tf.Session()
-    sess.run(tf.global_variables_initializer())
-
-    # Get operations for first-order derivatives
-    deriv_ops = {}
-    derivatives = Derivatives(inputs, outputs)
-    for class_ in config_train["classes"]:
-        deriv_ops[class_] = []
-        for variable in config_train["variables"]:
-            deriv_ops[class_].append(derivatives.get(class_, [variable]))
+    sess = tf.Session(graph=tensorflow_model)
 
     # Loop over testing dataset
     path = os.path.join(config_train["datasets"][(1, 0)[args.fold]])
@@ -140,6 +106,10 @@ def main(args, config_test, config_train):
                                 len(config_train["variables"])))
         weights = np.zeros((tree.GetEntries()))
 
+        derivative = outputs.outputs_dict[class_]
+
+        gradient = tf.gradients(derivative, input)
+
         for i_event in range(tree.GetEntries()):
             tree.GetEntry(i_event)
 
@@ -151,12 +121,20 @@ def main(args, config_test, config_train):
             response = model_keras.predict(values_preprocessed)
             response_keras = np.squeeze(response)
 
+            if dropout_name:
+                feed_dict = {
+                    input: values_preprocessed,
+                    dropout: False
+                }
+            else:
+                feed_dict = {
+                    input: values_preprocessed
+                }
+
             # Tensorflow inference
             response = sess.run(
-                model_tensorflow,
-                feed_dict={
-                    inputs.placeholders: values_preprocessed
-                })
+                output,
+                feed_dict=feed_dict)
             response_tensorflow = np.squeeze(response)
 
             # Check compatibility
@@ -168,17 +146,16 @@ def main(args, config_test, config_train):
                     format(mean_error, i_event))
                 raise Exception
 
-            # Calculate first-order derivatives
-            deriv_values = sess.run(
-                deriv_ops[class_],
-                feed_dict={
-                    inputs.placeholders: values_preprocessed
-                })
+            deriv_values = sess.run(gradient, feed_dict=feed_dict)
+
             deriv_values = np.squeeze(deriv_values)
             deriv_class[i_event, :] = deriv_values
 
             # Store weight
             weights[i_event] = weight[0]
+
+            if i_event % 10000 == 0:
+                logger.debug('Processing event {}'.format(i_event))
 
         if args.no_abs:
             mean_abs_deriv[class_] = np.average((deriv_class), weights=weights, axis=0)

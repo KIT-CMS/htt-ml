@@ -9,20 +9,16 @@ import yaml
 import pickle
 import numpy as np
 import os
-import sys
+import time
 
 import matplotlib as mpl
 mpl.use('Agg')
 mpl.rcParams['font.size'] = 20
 import matplotlib.pyplot as plt
-from matplotlib import cm
 
-from keras.models import load_model
 import tensorflow as tf
 
-from tensorflow_derivative.inputs import Inputs
-from tensorflow_derivative.outputs import Outputs
-from tensorflow_derivative.derivatives import Derivatives
+from tensorflow_derivative.keras_to_tensorflow import get_tensorflow_model
 
 import logging
 logger = logging.getLogger("keras_taylor_ranking")
@@ -34,7 +30,7 @@ logger.addHandler(handler)
 
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Produce confusion matrice")
+    parser = argparse.ArgumentParser(description="Calculate taylor coefficients.")
     parser.add_argument("config_training", help="Path to training config file")
     parser.add_argument("config_testing", help="Path to testing config file")
     parser.add_argument("fold", type=int, help="Trained model to be tested.")
@@ -50,6 +46,15 @@ def parse_config(filename):
     logger.debug("Load config %s.", filename)
     return yaml.load(open(filename, "r"))
 
+class derivative_operation(object):
+    def __init__(self, outputs, input, class_name):
+        self.derivative = outputs.outputs_dict[class_name]
+
+        self.first_order_gradients = tf.gradients(self.derivative, input)[0][0]
+        self.first_order_gradients = tf.unstack(self.first_order_gradients)
+        self.second_order_gradient = [tf.gradients(first_order_gradient, input) for first_order_gradient in self.first_order_gradients]
+
+
 
 def main(args, config_test, config_train):
     # Load preprocessing
@@ -58,41 +63,21 @@ def main(args, config_test, config_train):
     logger.info("Load preprocessing %s.", path)
     preprocessing = pickle.load(open(path, "rb"))
 
-    # Load Keras model
-    path = os.path.join(config_train["output_path"],
-                        config_test["model"][args.fold])
-    logger.info("Load keras model %s.", path)
-    model_keras = load_model(path)
-
-    # Get TensorFlow graph
-    variables = config_train["variables"]
-    inputs = Inputs(variables)
-
-    try:
-        sys.path.append("htt-ml/training")
-        import keras_models
-    except:
-        logger.fatal("Failed to import Keras models.")
-        raise Exception
-    try:
-        name_keras_model = config_train["model"]["name"]
-        model_tensorflow_impl = getattr(
-            keras_models, config_train["model"]["name"] + "_tensorflow")
-    except:
-        logger.fatal(
-            "Failed to load TensorFlow version of Keras model {}.".format(
-                name_keras_model))
-        raise Exception
-
     classes = config_train["classes"]
-    model_tensorflow = model_tensorflow_impl(inputs.placeholders, model_keras)
-    outputs = Outputs(model_tensorflow, classes)
+    variables = config_train["variables"]
 
-    sess = tf.Session()
-    sess.run(tf.global_variables_initializer())
+    model_keras, tensorflow_model, outputs, tf_input, tf_output, dropout_name = get_tensorflow_model(args,
+                                                                                                     config_train,
+                                                                                                     config_test)
+    if dropout_name:
+        dropout = tensorflow_model.get_tensor_by_name(dropout_name)
+    input = tensorflow_model.get_tensor_by_name(tf_input)
+    output = tensorflow_model.get_tensor_by_name(tf_output)
 
-    # Get operations for first-order and second-order derivatives
-    logger.debug("Set up derivative operations.")
+    sess = tf.Session(graph=tensorflow_model)
+
+    #Get names for first-order and second-order derivatives
+    logger.debug("Set up derivative names.")
     deriv_ops_names = []
     for variable in variables:
         deriv_ops_names.append([variable])
@@ -102,19 +87,26 @@ def main(args, config_test, config_train):
                 continue
             deriv_ops_names.append([i_var, j_var])
 
-    derivatives = Derivatives(inputs, outputs)
-    deriv_ops = {}
-    for class_ in classes:
-        deriv_ops[class_] = []
-        for names in deriv_ops_names:
-            deriv_ops[class_].append(derivatives.get(class_, names))
-
     # Loop over testing dataset
     path = os.path.join(config_train["datasets"][(1, 0)[args.fold]])
     logger.info("Loop over test dataset %s to get model response.", path)
     file_ = ROOT.TFile(path)
     deriv_class = {}
     weights = {}
+    deriv_ops = {}
+
+    for i_class, class_ in enumerate(classes):
+        logger.debug("Process class %s.", class_)
+
+        tree = file_.Get(class_)
+        if tree == None:
+            logger.fatal("Tree %s does not exist.", class_)
+            raise Exception
+
+        deriv_ops[class_] = derivative_operation(outputs=outputs, input=input, class_name=class_)
+
+    time_start = time.time()
+
     for i_class, class_ in enumerate(classes):
         logger.debug("Process class %s.", class_)
 
@@ -145,8 +137,10 @@ def main(args, config_test, config_train):
         weight = array("f", [-999])
         tree.SetBranchAddress(config_test["weight_branch"], weight)
 
+        length_deriv_class = (len(variables)**2 + len(variables))/2 + len(variables)
+
         deriv_class[class_] = np.zeros((tree.GetEntries(),
-                                        len(deriv_ops_names)))
+                                       length_deriv_class))
         weights[class_] = np.zeros((tree.GetEntries()))
 
         for i_event in range(tree.GetEntries()):
@@ -160,12 +154,22 @@ def main(args, config_test, config_train):
             response = model_keras.predict(values_preprocessed)
             response_keras = np.squeeze(response)
 
+            deriv_op = deriv_ops[class_]
+
+            if dropout_name:
+                feed_dict = {
+                    input: values_preprocessed,
+                    dropout: False
+                }
+            else:
+                feed_dict = {
+                    input: values_preprocessed
+                }
+
             # Tensorflow inference
             response = sess.run(
-                model_tensorflow,
-                feed_dict={
-                    inputs.placeholders: values_preprocessed
-                })
+                output,
+                feed_dict=feed_dict)
             response_tensorflow = np.squeeze(response)
 
             # Check compatibility
@@ -174,20 +178,30 @@ def main(args, config_test, config_train):
             if mean_error > 1e-5:
                 logger.fatal(
                     "Found mean error of {} between Keras and TensorFlow output for event {}.".
-                    format(mean_error, i_event))
+                        format(mean_error, i_event))
                 raise Exception
 
-            # Calculate first-order derivatives
-            deriv_values = sess.run(
-                deriv_ops[class_],
-                feed_dict={
-                    inputs.placeholders: values_preprocessed
-                })
+            first_order_values = sess.run(deriv_op.first_order_gradients, feed_dict=feed_dict)
+
+            second_order_values = sess.run(deriv_op.second_order_gradient, feed_dict=feed_dict)
+
+            second_order_stacked = np.stack(np.squeeze(second_order_values))
+            lower_hessian_half = second_order_stacked[np.triu_indices(len(variables))]
+            deriv_values = np.concatenate((np.squeeze(first_order_values), lower_hessian_half))
+
             deriv_values = np.squeeze(deriv_values)
             deriv_class[class_][i_event, :] = deriv_values
 
             # Store weight
             weights[class_][i_event] = weight[0]
+
+            if i_event % 10000 == 0:
+                time_between = time.time()
+                logger.info('Processing event {}'.format(i_event))
+                logger.info('Current time: {}'.format(time_between-time_start))
+
+    time_end = time.time()
+    logger.info('Elapsed time: {}'.format((time_end - time_start)/60.))
 
     # Calculate taylor coefficients
     mean_abs_deriv = {}
@@ -233,6 +247,25 @@ def main(args, config_test, config_train):
         ranking[class_] = ranking_tmp
         labels[class_] = labels_tmp
 
+    ranking_singles = {}
+    labels_singles = {}
+    for class_ in classes + ["all"]:
+        labels_tmp = []
+        ranking_tmp = []
+        for names, value in zip(deriv_ops_names, mean_abs_deriv[class_]):
+            if len(names) > 1:
+                continue
+            labels_tmp.append(", ".join(names))
+            ranking_tmp.append(value)
+
+        yx = zip(ranking_tmp, labels_tmp)
+        yx.sort(reverse=True)
+        labels_tmp = [x for y, x in yx]
+        ranking_tmp = [y for y, x in yx]
+
+        ranking_singles[class_] = ranking_tmp
+        labels_singles[class_] = labels_tmp
+
     # Write table
     for class_ in classes + ["all"]:
         output_path = os.path.join(config_train["output_path"],
@@ -242,6 +275,17 @@ def main(args, config_test, config_train):
         f = open(output_path, "w")
         for rank, (label, score) in enumerate(
                 zip(labels[class_], ranking[class_])):
+            f.write("{0:<4} : {1:<60} : {2:g}\n".format(rank, label, score))
+
+    # Write table
+    for class_ in classes + ["all"]:
+        output_path = os.path.join(config_train["output_path"],
+                                   "fold{}_keras_taylor_1D_{}.txt".format(
+                                       args.fold, class_))
+        logger.info("Save table to {}.".format(output_path))
+        f = open(output_path, "w")
+        for rank, (label, score) in enumerate(
+                zip(labels_singles[class_], ranking_singles[class_])):
             f.write("{0:<4} : {1:<60} : {2:g}\n".format(rank, label, score))
 
     # Store results for combined metric in file

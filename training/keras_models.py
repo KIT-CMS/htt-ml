@@ -1,8 +1,14 @@
-from keras.models import Sequential, load_model
+from keras.models import Sequential, load_model, Model
 from keras.layers import *
 from keras.optimizers import *
 from keras.regularizers import l2
-import numpy as np
+from keras_custom_metrics import *
+from functools import partial, update_wrapper
+
+def wrapped_partial(func, *args, **kwargs):
+    partial_func = partial(func, *args, **kwargs)
+    update_wrapper(partial_func, func)
+    return partial_func
 
 
 def example(num_inputs, num_outputs):
@@ -21,6 +27,7 @@ def example(num_inputs, num_outputs):
             "categorical_accuracy",
         ])
     return model
+
 
 
 def smhtt_simple(num_inputs, num_outputs):
@@ -143,6 +150,89 @@ def smhtt_dropout(num_inputs, num_outputs):
     model.compile(loss="mean_squared_error", optimizer=Nadam())
     return model
 
+def smhtt_dropout_relu(num_inputs, num_outputs):
+    model = Sequential()
+
+    for i, nodes in enumerate([200] * 2):
+        if i == 0:
+            model.add(Dense(nodes, input_dim=num_inputs))
+        else:
+            model.add(Dense(nodes))
+        model.add(BatchNormalization())
+        model.add(Activation("relu"))
+        #model.add(Dropout(0.5))
+
+    model.add(Dense(num_outputs))
+    model.add(BatchNormalization())
+    model.add(Activation("softmax"))
+
+    model.compile(loss="categorical_crossentropy", optimizer=Adam(lr=2e-2, decay=0.01))
+    return model
+
+def smhtt_significance(num_inputs, num_outputs):
+    inputs = Input(shape=(num_inputs,))
+    weights = Input(shape=(1,))
+
+    layer_1 = Dense(200, activation=None, kernel_regularizer=None)(inputs)
+    layer_1 = BatchNormalization()(layer_1)
+    layer_1 = Activation('relu')(layer_1)
+    #layer_1 = Dropout(rate=0.3)(layer_1)
+    layer_2 = Dense(200, activation=None, kernel_regularizer=None)(layer_1)
+    layer_2 = BatchNormalization()(layer_2)
+    layer_2 = Activation('relu')(layer_2)
+    #layer_2 = Dropout(rate=0.3)(layer_2)
+    output_ggh = Dense(num_outputs, activation=None, kernel_regularizer=None, name=None)(layer_2)
+    output_ggh = BatchNormalization(name=None)(output_ggh)
+    output_ggh = Activation('softmax', name='ggh')(output_ggh)
+    output_qqh = Lambda(lambda x: x, name='qqh')(output_ggh)
+    output_ztt = Lambda(lambda x: x, name='ztt')(output_ggh)
+    output_noniso = Lambda(lambda x: x, name='noniso')(output_ggh)
+    output_misc = Lambda(lambda x: x, name='misc')(output_ggh)
+
+    model = Model(inputs=[inputs, weights], outputs=[output_ggh, output_qqh, output_ztt, output_noniso, output_misc])
+
+    loss_dict = dict()
+    loss_dict['ggh'] = wrapped_partial(curry_loss_2(class_label=0), weights=weights)
+    loss_dict['qqh'] = wrapped_partial(curry_loss_2(class_label=1), weights=weights)
+    loss_dict['ztt'] = wrapped_partial(curry_loss_2(class_label=2), weights=weights)
+    loss_dict['noniso'] = wrapped_partial(curry_loss_2(class_label=3), weights=weights)
+    loss_dict['misc'] = wrapped_partial(curry_loss_2(class_label=4), weights=weights)
+
+    model.compile(loss=loss_dict, optimizer=Adam(lr=1e-3), loss_weights=[1.,1.,1.,1.,1.])
+    return model
+
+def smhtt_ams(num_inputs, num_outputs):
+    inputs = Input(shape=(num_inputs,))
+    weights = Input(shape=(1,))
+
+    layer_1 = Dense(200, activation=None, kernel_regularizer=None)(inputs)
+    layer_1 = BatchNormalization()(layer_1)
+    layer_1 = Activation('relu')(layer_1)
+    #layer_1 = Dropout(rate=0.3)(layer_1)
+    layer_2 = Dense(200, activation=None, kernel_regularizer=None)(layer_1)
+    layer_2 = BatchNormalization()(layer_2)
+    layer_2 = Activation('relu')(layer_2)
+    #layer_2 = Dropout(rate=0.3)(layer_2)
+    output_ggh = Dense(num_outputs, activation=None, kernel_regularizer=None, name=None)(layer_2)
+    output_ggh = BatchNormalization()(output_ggh)
+    output_ggh = Activation('softmax', name='ggh')(output_ggh)
+    output_qqh = Lambda(lambda x: x, name='qqh')(output_ggh)
+    output_ztt = Lambda(lambda x: x, name='ztt')(output_ggh)
+    output_noniso = Lambda(lambda x: x, name='noniso')(output_ggh)
+    output_misc = Lambda(lambda x: x, name='misc')(output_ggh)
+
+    model = Model(inputs=[inputs, weights], outputs=[output_ggh, output_qqh, output_ztt, output_noniso, output_misc])
+
+    loss_dict = dict()
+    loss_dict['ggh'] = wrapped_partial(ams_curry_loss(class_label=0), weights=weights)
+    loss_dict['qqh'] = wrapped_partial(ams_curry_loss(class_label=1), weights=weights)
+    loss_dict['ztt'] = wrapped_partial(ams_curry_loss(class_label=2), weights=weights)
+    loss_dict['noniso'] = wrapped_partial(ams_curry_loss(class_label=3), weights=weights)
+    loss_dict['misc'] = wrapped_partial(ams_curry_loss(class_label=4), weights=weights)
+
+    model.compile(loss=loss_dict, optimizer=Adam(lr=1e-3), loss_weights=[1.,1.,1.,1.,1.])
+    return model
+
 
 def smhtt_dropout_tanh(num_inputs, num_outputs):
     model = Sequential()
@@ -158,7 +248,7 @@ def smhtt_dropout_tanh(num_inputs, num_outputs):
     model.add(Dense(num_outputs, kernel_regularizer=l2(1e-5)))
     model.add(Activation("softmax"))
 
-    model.compile(loss="categorical_crossentropy", optimizer=Adam(lr=1e-4), weighted_metrics=["mean_squared_error"])
+    model.compile(loss="categorical_crossentropy", optimizer=Adam(lr=1e-4), weighted_metrics=["mean_squared_error"], metrics=['accuracy'])
     return model
 
 
