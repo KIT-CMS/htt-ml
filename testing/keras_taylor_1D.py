@@ -9,6 +9,7 @@ import yaml
 import pickle
 import numpy as np
 import os
+import sys
 
 import matplotlib as mpl
 mpl.use('Agg')
@@ -17,7 +18,9 @@ import matplotlib.pyplot as plt
 
 import tensorflow as tf
 
-from tensorflow_derivative.keras_to_tensorflow import get_tensorflow_model
+sys.path.append('htt-ml/utils')
+
+from keras_to_tensorflow import get_tensorflow_model
 
 import logging
 logger = logging.getLogger("keras_taylor_1D")

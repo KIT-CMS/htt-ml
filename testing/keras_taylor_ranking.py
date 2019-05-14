@@ -10,15 +10,18 @@ import pickle
 import numpy as np
 import os
 import time
+import sys
 
 import matplotlib as mpl
 mpl.use('Agg')
 mpl.rcParams['font.size'] = 20
 import matplotlib.pyplot as plt
 
+sys.path.append('htt-ml/utils')
+
 import tensorflow as tf
 
-from tensorflow_derivative.keras_to_tensorflow import get_tensorflow_model
+from keras_to_tensorflow import get_tensorflow_model
 
 import logging
 logger = logging.getLogger("keras_taylor_ranking")
