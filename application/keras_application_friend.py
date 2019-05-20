@@ -13,6 +13,15 @@ import os
 
 from keras.models import load_model
 
+import logging
+logger = logging.getLogger("keras_application_friend")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -80,6 +89,11 @@ def main(args, config_dataset, config_training, config_application):
         raise Exception("File can not be updated: {}".format(output_filename))
 
     tree_dir = os.path.dirname(args.tree)
+
+    if output_filename == '/ceph/swozniewski/SM_Htautau/ntuples/Artus17_Jan/merged_fixedjets/WminusHToTauTauM125_RunIIFall17MiniAODv2_PU2017_13TeV_MINIAOD_powheg-pythia8_v1/WminusHToTauTauM125_RunIIFall17MiniAODv2_PU2017_13TeV_MINIAOD_powheg-pythia8_v1.root':
+        logger.setLevel(logging.DEBUG)
+        logger.debug('Set debug level for tree {}'.format(output_filename))
+
     if file_output.mkdir(tree_dir) == None:
         raise Exception("Directory {} did already exist for file {}.".format(
             tree_dir, args.input))
@@ -97,6 +111,8 @@ def main(args, config_dataset, config_training, config_application):
                                response_single_scores[-1], "{}{}/F".format(
                                    prefix, class_)))
 
+    logger.debug('Set branches')
+
     response_max_score = array("f", [-999])
     response_branches.append(
         tree_output.Branch("{}max_score".format(prefix), response_max_score,
@@ -107,6 +123,7 @@ def main(args, config_dataset, config_training, config_application):
         tree_output.Branch("{}max_index".format(prefix), response_max_index,
                            "{}max_index/F".format(prefix)))
 
+    logger.debug('Start looping over events')
     # Loop over events and add method's response to tree
     for i_event in range(tree_input.GetEntries()):
         # Get current event
@@ -118,7 +135,13 @@ def main(args, config_dataset, config_training, config_application):
         values_preprocessed = preprocessing[event %
                                             2].transform(values_stacked)
         response = classifiers[event % 2].predict(values_preprocessed)
-        response = np.squeeze(response)
+        #response = np.squeeze(response)
+
+        if i_event % 10000 == 0:
+            logger.debug('Currently on event {}'.format(i_event))
+
+        if len(response.shape) == 2:
+            response = response[0]
 
         # Find max score and index
         response_max_score[0] = -999.0
@@ -130,6 +153,8 @@ def main(args, config_dataset, config_training, config_application):
 
         # Fill branches
         tree_output.Fill()
+
+    logger.debug('Finished looping over events')
 
     # Write new branches to output file
     file_input.Close()
