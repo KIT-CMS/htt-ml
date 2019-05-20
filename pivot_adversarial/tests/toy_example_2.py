@@ -17,7 +17,6 @@ X0 = np.random.multivariate_normal(mean=np.array([0., 0.]),  cov=np.array([[1., 
 X1 = np.random.multivariate_normal(mean=np.array([1., 1.]), cov=np.eye(2), size=n_samples //2)
 z = np.random.normal(loc=0.0, scale=1.0, size=n_samples)
 
-
 X1[:,1] += z[n_samples //2 :]
 
 X = np.vstack([X0, X1])
@@ -60,7 +59,7 @@ X_train, X_valid, y_train, y_valid, z_train, z_valid = train_test_split(X, y, Z,
 # print(y_train)
 # print(z_train)
 
-from sklearn.metrics import roc_curve
+from sklearn.metrics import roc_curve, roc_auc_score
 from keras.layers import Input, Dense, Merge, Lambda, Concatenate, Activation
 from keras.models import Model, Sequential
 
@@ -176,10 +175,33 @@ plt.savefig("f-plain_2.pdf")
 
 plt.clf()
 
-tpr = dict()
-fpr = dict()
+def make_shifted_examples(n_samples, z):
+    np.random.seed(int(time.time()))
+    X0 = np.random.multivariate_normal(mean=np.array([0., 0.]), cov=np.array([[1., -0.5], [-0.5, 1.]]),
+                                       size=n_samples // 2)
+    X1 = np.random.multivariate_normal(mean=np.array([1., 1.]), cov=np.eye(2), size=n_samples // 2)
+    X1[:, 1] += z
+    X = np.vstack([X0, X1])
+    y = np.zeros(n_samples)
+    y[n_samples // 2:] = 1
+    #
+    # plt.title("$X$")
+    # plt.scatter(X[y==0, 0], X[y==0, 1], c="r", marker="o", edgecolors="none")
+    # plt.scatter(X[y==1, 0], X[y==1, 1], c="b", marker="o", edgecolors="none")
+    # plt.xlim(-4, 4)
+    # plt.ylim(-4, 4)
+    # plt.show()
 
-fpr['plain'], tpr['plain'], _ = roc_curve(y_true=y_valid, y_score=discriminator.predict(X_valid))
+    return X, y, z
+
+tpr_plain = dict()
+fpr_plain = dict()
+auc_plain = dict()
+
+for shift in [1, 0, -1]:
+    X_roc, y_roc, z_roc = make_shifted_examples(n_samples=200000, z=shift)
+    fpr_plain[shift], tpr_plain[shift], _ = roc_curve(y_true=y_roc, y_score=discriminator.predict(X_roc))
+    auc_plain[shift] = roc_auc_score(y_true=y_roc, y_score=discriminator.predict(X_roc))
 
 from matplotlib.mlab import griddata
 
@@ -198,7 +220,11 @@ yi = np.linspace(-1., 3, 100)
 zi = griddata(x=X_test[:, 0], y=X_test[:, 1], z=y_pred, xi=xi, yi=yi, interp="linear")
 CS = plt.contourf(xi, yi, zi, 20, cmap=plt.cm.viridis,
                   vmax=1.0, vmin=0.0)
-plt.colorbar()
+m = plt.cm.ScalarMappable(cmap=plt.cm.viridis)
+m.set_array(y_pred)
+m.set_clim(0., 1.)
+plt.colorbar(m, boundaries=np.linspace(0, 1, 10))
+#plt.colorbar()
 plt.scatter([0], [0], c="red", linewidths=0, label=r"$\mu_0$")
 plt.scatter([1], [0], c="blue", linewidths=0, label=r"$\mu_1|Z=z$")
 plt.scatter([1], [0+1], c="blue", linewidths=0)
@@ -211,17 +237,8 @@ plt.ylim(-1,3)
 plt.legend(loc="upper left", scatterpoints=1)
 plt.savefig("surface-plain_2.png")
 plt.savefig("surface-plain_2.pdf")
-#plt.show()
 
-# Pad z_train and z_valid to fit the output nodes of the model?
-
-# z_train_reshape = np.reshape(z_train, (-1,1))
-# z_train_padding = np.zeros((z_train_reshape.shape[0], no_parameters*components))
-# z_train_padding[:z_train_reshape.shape[0],:z_train_reshape.shape[1]] = z_train_reshape
-#
-# z_valid_reshape = np.reshape(z_valid, (-1,1))
-# z_valid_padding = np.zeros((z_valid_reshape.shape[0], no_parameters*components))
-# z_valid_padding[:z_valid_reshape.shape[0],:z_valid_reshape.shape[1]] = z_valid_reshape
+plt.clf()
 
 # Pretraining of R
 discriminator.trainable = False
@@ -308,7 +325,6 @@ plt.hist(discriminator.predict(make_X(200000, z=-1)), bins=50, normed=1, histtyp
 plt.hist(discriminator.predict(make_X(200000, z=0)), bins=50, normed=1, histtype="step", label="$p(f(X)|Z=0)$")
 plt.hist(discriminator.predict(make_X(200000, z=1)), bins=50, normed=1, histtype="step", label="$p(f(X)|Z=+\sigma)$")
 plt.legend(loc="best")
-#plt.ylim(0,4)
 plt.xlabel("$f(X)$")
 plt.ylabel("$p(f(X))$")
 plt.grid()
@@ -316,7 +332,14 @@ plt.savefig("f-adversary_2.png")
 plt.savefig("f-adversary_2.pdf")
 plt.clf()
 
-fpr['adversary'], tpr['adversary'], _ = roc_curve(y_true=y_valid, y_score=discriminator.predict(X_valid))
+tpr_adversary = dict()
+fpr_adversary = dict()
+auc_adversary = dict()
+
+for shift in [1, 0, -1]:
+    X_roc, y_roc, z_roc = make_shifted_examples(n_samples=200000, z=shift)
+    fpr_adversary[shift], tpr_adversary[shift], _ = roc_curve(y_true=y_roc, y_score=discriminator.predict(X_roc))
+    auc_adversary[shift] = roc_auc_score(y_true=y_roc, y_score=discriminator.predict(X_roc))
 
 
 from matplotlib.mlab import griddata
@@ -347,23 +370,30 @@ plt.text(1.2, 1-0.1, "$Z=0$", color="k")
 plt.text(1.2, 2-0.1, "$Z=\sigma$", color="k")
 plt.xlim(-1,2)
 plt.ylim(-1,3)
+#plt.zlim(0.,1.0)
 plt.legend(loc="upper left", scatterpoints=1)
 plt.savefig("surface-adversary_2.png")
 plt.savefig("surface-adversary_2.pdf")
 plt.clf()
 
-for key, item in fpr.items():
-    fpr_lam = item
-    tpr_lam = tpr[key]
-    plt.plot(fpr_lam, tpr_lam, lw=2, label='{}'.format(key))
-plt.xlim([0.0, 1.0])
-plt.ylim([0.0, 1.05])
-plt.xlabel('False Positive Rate')
-plt.ylabel('True Positive Rate')
-plt.title('Receiver operating characteristic')
-plt.legend(loc="lower right")
-
-output_path = 'roc-all'
-
-plt.savefig(output_path + '.pdf')
-plt.savefig(output_path + '.png')
+# for key, item in fpr_plain.items():
+#     fpr_lam = item
+#     tpr_lam = tpr_plain[key]
+#     AUC = auc_plain[key]
+#     plt.plot(fpr_lam, tpr_lam, lw=2, label='Shift={}, AUC={}'.format(key, AUC))
+# for key, item in fpr_adversary.items():
+#     fpr_lam = item
+#     tpr_lam = tpr_adversary[key]
+#     AUC = auc_adversary[key]
+#     plt.plot(fpr_lam, tpr_lam, lw=2, label='Shift={}, AUC={}'.format(key, AUC))
+# plt.xlim([0.0, 1.0])
+# plt.ylim([0.0, 1.05])
+# plt.xlabel('False Positive Rate')
+# plt.ylabel('True Positive Rate')
+# plt.title('Receiver operating characteristic')
+# plt.legend(loc="lower right")
+#
+# output_path = 'roc-all'
+#
+# plt.savefig(output_path + '.pdf')
+# plt.savefig(output_path + '.png')

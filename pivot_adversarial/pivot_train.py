@@ -16,6 +16,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Train pivot adversarial network")
     parser.add_argument("config", help="Path to training config file")
+    parser.add_argument("splitted", choices=['True', 'False'], help="Adversary and classifier datasets different?")
     parser.add_argument("fold", type=int, help="Select the fold to be trained")
     return parser.parse_args()
 
@@ -78,11 +79,8 @@ def main(args, config):
 
     np.random.seed(int(config["seed"]))
 
-    # Extract list of variables
-    variables = config["variables"]
-    logger.debug("Use variables:")
-    for v in variables:
-        logger.debug("%s", v)
+    n_samples = config['n_samples']
+    adv_output = config['adv_output']
 
     # Make sure output path exists
     output_path = config['output_path']
@@ -90,21 +88,28 @@ def main(args, config):
         os.makedirs(output_path)
 
     # Load training dataset
-    filename = config["datasets"][args.fold]
-    logger.debug("Load training dataset from %s.", filename)
-    with open(filename, "rb") as fd:
-        X_train, X_test, y_train, y_test, z_train, z_test, scaler = pickle.load(fd)
-
-    classes = config["classes"]
-
-    # Add callbacks
-    callbacks = []
+    if args.splitted == "True":
+        filename = config["classifier_datasets"][args.fold]
+        logger.debug("Load classifier dataset from %s.", filename)
+        with open(filename, "rb") as fd:
+            X_train_classifier, X_test, y_train, y_test, z_train_classifier, z_test = pickle.load(fd)
+        filename = config["adversary_datasets"][args.fold]
+        logger.debug("Load adversary dataset from %s.", filename)
+        with open(filename, "rb") as fd:
+            X_train_adversary, X_test, y_train, y_test, z_train_adversary, z_test = pickle.load(fd)
+    else:
+        filename = config["datasets"][args.fold].format(n_samples, adv_output)
+        logger.debug("Load dataset from %s.", filename)
+        with open(filename, "rb") as fd:
+            X_train_classifier, X_test, y_train, y_test, z_train_classifier, z_test = pickle.load(fd)
+        X_train_adversary = X_train_classifier
+        z_train_adversary = z_train_classifier
 
     # Train model
     logger.info("Train keras model %s.", config["model"]["name"])
 
     if config["model"]["batch_size"] < 0:
-        batch_size = X_train.shape[0]
+        batch_size = X_train_classifier.shape[0]
     else:
         batch_size = config["model"]["batch_size"]
 
@@ -112,19 +117,28 @@ def main(args, config):
     
     logger.info("Lambda parameter is {}".format(lambda_parameter))
 
+    epochs = config['model']['epochs']
+    dropout = config['model']['dropout']
+
     model_impl = getattr(pivot_models, config["model"]["name"])
-    model = model_impl(len(variables), 1, z_train.shape[1], lambda_parameter)
+    if adv_output == 'binned':
+        num_adv_outputs = z_train_adversary.shape[1]
+    else:
+        num_adv_outputs = 1
+    model = model_impl(X_train_classifier.shape[1], 1, num_adv_outputs, lambda_parameter, dropout)
     model.summary()
-    model.pretrain_classifier(X_train, y_train, epochs=10, verbose=1)
+    model.pretrain_classifier(X_train_classifier, y_train, path=output_path, fold=args.fold, epochs=epochs, verbose=1)
     if lambda_parameter > 0.0:
-        model.pretrain_adversary(X_train[y_train == 0], z_train[y_train == 0], epochs=10, verbose=1)
+        model.pretrain_adversary(X_train_adversary, z_train_adversary, epochs=epochs, verbose=1)
+        losses = model.evaluate_adversary(X_test[(y_test[:,0] == 1)], z_test[(y_test[:,0] == 1)])
+        logger.info('Evaluation of adversary gives the following losses: {}'.format(losses))
 
     history = model.fit(
-        X_train,
-        X_train[y_train == 0],
+        X_train_classifier,
+        X_train_adversary,
         y_train,
-        z_train,
-        z_train[y_train == 0],
+        z_train_classifier,
+        z_train_adversary,
         validation_data=(X_test, y_test, z_test),
         batch_size=batch_size,
         n_iter=config['model']['n_iter'])
