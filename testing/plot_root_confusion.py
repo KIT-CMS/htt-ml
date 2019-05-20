@@ -24,7 +24,7 @@ channel_dict = {
 }
 
 classes_true = {
-    "em" : [{"ggH":"ggh"},{"qqH":"qqh"},{"ztt":"ztt"},{"qcd":"ss"},   {"tt":"tt"},{"misc":"misc"}, {"db":"db"}, {"st":"st"}],
+    "em" : [{"ggH":"em_ggh"},{"qqH":"em_qqh"},{"ztt":"em_ztt"},{"qcd":"em_ss"},   {"tt":"em_tt"},{"misc":"em_misc"}, {"db":"em_vv"}, {"st":"em_st"}],
     "et" : [{"ggH":"ggh"},{"qqH":"qqh"},{"ztt":"ztt"},{"qcd":"ss"},   {"tt":"tt"},{"misc":"misc"},{"zll":"zll"},{"wj":"w"} ],
     "mt" : [{"ggH":"ggh"},{"qqH":"qqh"},{"ztt":"ztt"},{"qcd":"ss"},   {"tt":"tt"},{"misc":"misc"},{"zll":"zll"},{"wj":"w"} ],
     "tt" : [{"ggH":"ggh"},{"qqH":"qqh"},{"ztt":"ztt"},{"qcd":"noniso"},            {"misc":"misc"}],
@@ -85,7 +85,7 @@ for inp in input_list:
 
     for i in range(nbins):
         for j in range(nbins):
-            value = round(inp_dict[classes_true[ch][i].values()[0]][classes_pred[ch][j].values()[0]], 3)
+            value = inp_dict[classes_true[ch][i].values()[0]][classes_pred[ch][j].values()[0]]
             hc.Fill(classes_true[ch][i].keys()[0], classes_pred[ch][j].keys()[0], value)
 
     hc.SetMarkerSize(1.5)
