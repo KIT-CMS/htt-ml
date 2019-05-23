@@ -44,13 +44,21 @@ def main(args, config):
                              "merge_fold{}_{}.root".format(num_fold, process)))
             file_ = ROOT.TFile(created_files[-1], "RECREATE")
 
-            # Collect all files for this process in a chain
+            # Collect all files for this process in a chain. Create also chains for friend files
             chain = ROOT.TChain(config["tree_path"])
+            friendchains = {}
+            for d in config["friend_paths"]:
+                friendchains[d] = ROOT.TChain(config["tree_path"])
+
             for filename in config["processes"][process]["files"]:
                 path = os.path.join(config["base_path"], filename)
                 if not os.path.exists(path):
                     logger.fatal("File does not exist: {}".format(path))
                 chain.AddFile(path)
+                # Make sure, that friend files are put in the same order together
+                for d in friendchains:
+                    friendfile = os.path.join(d,filename)
+                    friendchains[d].AddFile(friendfile)
 
             chain_numentries = chain.GetEntries()
             if not chain_numentries > 0:
@@ -69,6 +77,11 @@ def main(args, config):
 
             chain_skimmed = chain.CopyTree(cut_string)
             chain_skimmed_numentries = chain_skimmed.GetEntries()
+            friendchains_skimmed = {}
+            # Apply skim selection also to friend chains
+            for d in friendchains:
+                friendchains[d].AddFriend(chain)
+                friendchains_skimmed[d] = friendchains[d].CopyTree(cut_string)
             if not chain_skimmed_numentries > 0:
                 logger.fatal(
                     "Chain (after skimming) does not contain any events.")
@@ -95,6 +108,9 @@ def main(args, config):
             logger.debug("Write output file for this process and fold.")
             chain_skimmed.SetName(config["processes"][process]["class"])
             chain_skimmed.Write()
+            for index, d in enumerate(friendchains_skimmed):
+                friendchains_skimmed[d].SetName("_".join([config["processes"][process]["class"], "friend", str(index)]))
+                friendchains_skimmed[d].Write()
             file_.Close()
 
         # Combine all skimmed files using `hadd`

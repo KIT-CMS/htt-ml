@@ -73,6 +73,9 @@ def main(args, config):
         if tree == None:
             logger.fatal("Tree %s not found in file %s.", class_, filename)
             raise Exception
+        friend_trees_names = [k.GetName() for k in rfile.GetListOfKeys() if "_".join([class_,"friend"]) in k.GetName()]
+        for friend in friend_trees_names:
+            tree.AddFriend(friend)
 
         # Get inputs for this class
         x_class = np.zeros((tree.GetEntries(), len(variables)))

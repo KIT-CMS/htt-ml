@@ -42,6 +42,7 @@ def main(args, config_dataset, config_training, config_application):
 
     # Open input file and register branches with input variables
     file_input = ROOT.TFile(args.input)
+    nick = args.input.split('/')[-2] # needed to access the friend files
     if file_input == None:
         raise Exception("File is not existent: {}".format(args.input))
 
@@ -49,6 +50,9 @@ def main(args, config_dataset, config_training, config_application):
     if tree_input == None:
         raise Exception("Input tree {} is not existent in file: {}".format(
             args.tree, args.input))
+    # Add friend files to the tree
+    for friend_dir in config_dataset["friend_paths"]:
+        tree_input.AddFriend(args.tree, os.path.join(friend_dir,nick,nick+".root"))
 
     values = []
     for variable in config_training["variables"]:
