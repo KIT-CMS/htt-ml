@@ -130,8 +130,7 @@ def main(args, config):
     model.pretrain_classifier(X_train_classifier, y_train, path=output_path, fold=args.fold, epochs=epochs, verbose=1)
     if lambda_parameter > 0.0:
         model.pretrain_adversary(X_train_adversary, z_train_adversary, epochs=epochs, verbose=1)
-        losses = model.evaluate_adversary(X_test[(y_test[:,0] == 1)], z_test[(y_test[:,0] == 1)])
-        logger.info('Evaluation of adversary gives the following losses: {}'.format(losses))
+
 
     history = model.fit(
         X_train_classifier,

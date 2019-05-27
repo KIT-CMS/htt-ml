@@ -163,9 +163,6 @@ class PivotAdversarialClassifier(object):
         self._trainable_adv_net(True)
         self._adv.fit(x,z, epochs=epochs, verbose=verbose)
 
-    def evaluate_adversary(self, x,z):
-        return self._adv.evaluate(x,z)
-
     def save(self, path, fold):
         classifier_path = os.path.join(path, 'fold{}_classifier-l={}.h5'.format(fold,self.lam))
         self._clf.save(filepath=classifier_path, overwrite=True)
@@ -377,7 +374,7 @@ class RealAdversarialClassifier(object):
 
     def _create_classification_adversary(self, num_inputs, num_ouputs):
         logger.info('Creating classification adversary')
-        return adversary_softmax(num_inputs=num_inputs, num_outputs=num_ouputs, layers=[200]*3)
+        return adversary_softmax(num_inputs=num_inputs, num_outputs=num_ouputs, layers=[64]*2)
 
     def _compile_clf(self, clf_net):
         clf = clf_net
@@ -404,7 +401,7 @@ class RealAdversarialClassifier(object):
         self._trainable_clf_net(False)
         self._trainable_adv_net(True)
         optimizer = Adam()
-        adv.compile(loss=['categorical_crossentropy'], optimizer=optimizer)
+        adv.compile(loss=['categorical_crossentropy'], optimizer=optimizer, metrics=['accuracy'])
         return adv
 
     def pretrain_classifier(self, x, y, sample_weights, batch_size, path, fold, epochs=10, verbose=0, ):
@@ -419,6 +416,9 @@ class RealAdversarialClassifier(object):
         self._trainable_adv_net(True)
         self._adv.fit(x,z, epochs=epochs, class_weight=class_weights, batch_size=batch_size, verbose=verbose, shuffle=True)
 
+    def evaluate_adversary(self, x,z):
+        return self._adv.evaluate(x,z)
+
     def save(self, path, fold):
         classifier_path = os.path.join(path, 'fold{}_classifier-l={}.h5'.format(fold,self.lam))
         self._clf.save(filepath=classifier_path, overwrite=True)
@@ -428,7 +428,7 @@ class RealAdversarialClassifier(object):
         self._clf.save(filepath=combined_path, overwrite=True)
         logger.info("Saved all models to {}".format(path))
 
-    def fit(self, x_class, x_adv, y_class, z_class, z_adv, sample_weights, class_weights_adv=None, validation_data=None, n_iter=200, batch_size=128):
+    def fit(self, x_class, x_adv, y_class, z_class, z_adv, sample_weights, class_weights_adv=None, validation_data=None, n_iter=200, batch_size=128, verbose=0):
         if validation_data is not None:
             x_val, y_val, z_val, w_val = validation_data
 
@@ -440,7 +440,7 @@ class RealAdversarialClassifier(object):
         for idx in range(n_iter):
             if idx % 10 == 0 and validation_data is not None:
                 print('Currently on batch {}'.format(idx))
-                loss = self._clf_w_adv.evaluate(x_val, [y_val, z_val], sample_weight=[w_val, w_val_adv], verbose=0)
+                loss = self._clf_w_adv.evaluate(x_val, [y_val, z_val], sample_weight=[w_val, w_val_adv], verbose=verbose)
                 losses["L_f - L_r"].append(loss[0])
                 losses["L_f"].append(loss[1])
                 losses["L_r"].append(loss[2])
@@ -452,7 +452,7 @@ class RealAdversarialClassifier(object):
             if self.lam > 0.0:
                 self._trainable_clf_net(False)
                 self._trainable_adv_net(True)
-                self._adv.fit(x_adv, z_adv, class_weight=class_weights_adv, epochs=1, verbose=0)
+                self._adv.fit(x_adv, z_adv, class_weight=class_weights_adv, epochs=1, verbose=verbose)
 
             # train classifier
             self._trainable_clf_net(True)

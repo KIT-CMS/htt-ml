@@ -42,68 +42,6 @@ def parse_config(filename):
     return yaml.load(open(filename, "r"))
 
 
-# def plot_significance(discriminator, title):
-#     nbins = 50
-#
-#     fig, (ax, ax_2) = plt.subplots(2, 1, gridspec_kw={'height_ratios': [3, 1]}, figsize=(10, 10))
-#
-#     X0_nom, X1_nom = make_X(n_samples=400000, z=0)
-#     pred_0_nom = discriminator.predict(X0_nom)
-#     pred_1_nom = discriminator.predict(X1_nom)
-#
-#     #print(pred_1_nom.ravel(), pred_0_nom.ravel())
-#
-#     values_nominal, _, _ = ax.hist([pred_0_nom.ravel(), pred_1_nom.ravel()], bins=nbins, stacked=True, normed=0, histtype="step",
-#                                 label=[r"$p(f(S))$", r"$p(f(B)|Z=0)$"], linewidth=3.0)
-#
-#     X0_down, X1_down = make_X(n_samples=400000, z=-1)
-#     pred_1_down = discriminator.predict(X1_down)
-#     combined_down = np.vstack([pred_0_nom, pred_1_down])
-#
-#     values_down, _, _ = ax.hist(combined_down, bins=nbins, normed=0, histtype="step",
-#                                 label=r"$p(f(B)|Z=-\sigma)$", linewidth=3.0)
-#
-#
-#     X0_up, X1_up = make_X(n_samples=400000, z=+1)
-#     pred_1_up = discriminator.predict(X1_up)
-#     combined_up = np.vstack([pred_0_nom, pred_1_up])
-#     values_up, _, _ = ax.hist(combined_up, bins=nbins, normed=0,
-#                                         histtype="step",
-#                                         label= r"$p(f(B)|Z=+\sigma)$",
-#                                         linewidth=3.0)
-#
-#     ax.legend(loc="best")
-#     ax.set_xlim([0., 1.0])
-#     ax.set_ylim([0.,60000.])
-#     plt.xlabel("$f(X)$")
-#     ax.set_ylabel("$Number of events$")
-#     plt.grid()
-#
-#     background_values = values_nominal[1] - values_nominal[0]
-#
-#     sigma_b = []
-#     significance = []
-#     x_values = []
-#     for i, bin in enumerate(values_down):
-#         sigma_b.append(np.abs((values_up[i] - bin) / 2.))
-#
-#     for i, bin in enumerate(values_nominal[0]):
-#         signal_events = bin
-#         background_events = background_values[i]
-#         significance.append(signal_events / np.sqrt(signal_events + background_events + sigma_b[i]))
-#         x_values.append(float(i) / float(nbins) + 1. / float(nbins) / 2.)
-#
-#     ax_2.plot(x_values, significance, 'ro')
-#     ax_2.set_xlim([0., 1.0])
-#     ax_2.set_ylabel(r'$S/\sqrt{S+B + \sigma_B}$')
-#     ax_2.set_ylim([0.,100.])
-#     fig.tight_layout()
-#     fig.savefig(title + ".png", bbox_inches="tight")
-#     fig.savefig(title + ".pdf", bbox_inches="tight")
-#     logger.info("Saved significance plot to {}".format(title))
-#     fig.clf()
-#     pass
-
 def plot_histograms(title, dictionary, classes, weights, output_path, nbins = 20):
     list_of_histograms = []
     list_of_backgrounds = []
@@ -243,8 +181,9 @@ def plot_ratios(title, dictionary, classes, weights, output_path, nbins = 20):
     ax_2.plot(x_values, ratio_up_per_bin, 'ro', label='Up ratio', color='green')
     ax_2.plot(x_values, ratio_down_per_bin, 'ro', label='Down ratio', color='red')
     ax_2.axhline(y=1.0, color='grey', linestyle='--')
-    ax_2.legend()
+    ax_2.legend(loc="upper left")
     ax_2.set_xlim([0.,1.0])
+    ax_2.set_ylim([0.9,1.1])
     ax_2.set_ylabel(r'Ratio Shift/Nominal')
     fig.tight_layout()
     fig.savefig(output_path + ".png", bbox_inches="tight")
@@ -262,112 +201,116 @@ def main(args, config_test, config_train):
     logger.info("Load preprocessing %s.", path)
     preprocessing = pickle.load(open(path, "rb"))
 
-    path = os.path.join(config_train["output_path"],
+    classifier_dict = {'pre': None, 'decorrelated': None}
+
+    classifier_dict['pre'] = os.path.join(config_train["output_path"],
+                        config_test["pre_classifier_model"][args.fold].format(lam))
+    classifier_dict['decorrelated'] = os.path.join(config_train["output_path"],
                         config_test["decorrelated_classifier_model"][args.fold].format(lam))
-    logger.info("Load keras model %s.", path)
-    model = load_model(path, compile=False)
+    for model_key, model_path in classifier_dict.items():
+        logger.info("Load keras model %s.", model_path)
+        model = load_model(model_path, compile=False)
 
-    path = os.path.join(config_train["datasets"][(1, 0)[args.fold]])
-    logger.info("Loop over test dataset %s to get model response.", path)
-    file_ = ROOT.TFile(path)
+        path = os.path.join(config_train["datasets"][(1, 0)[args.fold]])
+        logger.info("Loop over test dataset %s to get model response.", path)
+        file_ = ROOT.TFile(path)
 
-    # Setup dictionaries
+        # Setup dictionaries
 
-    all_classes = OrderedDict()
-    all_weights = OrderedDict()
-    for class_predicted in config_train['classes']:
-        actual_dict = OrderedDict()
-        actual_weights = OrderedDict()
-        all_classes[class_predicted] = actual_dict
-        all_weights[class_predicted] = actual_weights
-        for actual_class in config_train['classes']:
-            if class_predicted == 'ggh' and actual_class=='ggh':
-                shifted_ggh = OrderedDict()
-                weights_ggh = OrderedDict()
-                all_classes[class_predicted][actual_class] = shifted_ggh
-                all_weights[class_predicted][actual_class] = weights_ggh
-                for shift in ['nom', 'up', 'down']:
-                    all_classes[class_predicted][actual_class][shift] = []
-                    all_weights[class_predicted][actual_class][shift] = []
-            else:
-                all_classes[class_predicted][actual_class] = []
-                all_weights[class_predicted][actual_class] = []
+        all_classes = OrderedDict()
+        all_weights = OrderedDict()
+        for class_predicted in config_train['classes']:
+            actual_dict = OrderedDict()
+            actual_weights = OrderedDict()
+            all_classes[class_predicted] = actual_dict
+            all_weights[class_predicted] = actual_weights
+            for actual_class in config_train['classes']:
+                if class_predicted == 'ggh' and actual_class=='ggh':
+                    shifted_ggh = OrderedDict()
+                    weights_ggh = OrderedDict()
+                    all_classes[class_predicted][actual_class] = shifted_ggh
+                    all_weights[class_predicted][actual_class] = weights_ggh
+                    for shift in ['nom', 'up', 'down']:
+                        all_classes[class_predicted][actual_class][shift] = []
+                        all_weights[class_predicted][actual_class][shift] = []
+                else:
+                    all_classes[class_predicted][actual_class] = []
+                    all_weights[class_predicted][actual_class] = []
 
-    #print(all_classes, all_weights)
+        classes = config_train['classes']
+        class_weights = config_train["class_weights"]
+        for i_class, class_ in enumerate(config_train["classes"]):
+            logger.debug("Process class %s.", class_)
 
-    classes = config_train['classes']
-    class_weights = config_train["class_weights"]
-    for i_class, class_ in enumerate(config_train["classes"]):
-        logger.debug("Process class %s.", class_)
-
-        tree = file_.Get(class_)
-        if tree == None:
-            logger.fatal("Tree %s does not exist.", class_)
-            raise Exception
-
-        values = []
-        for variable in config_train["variables"]:
-            typename = tree.GetLeaf(variable).GetTypeName()
-            if  typename == "Float_t":
-                values.append(array("f", [-999]))
-            elif typename == "Int_t":
-                values.append(array("i", [-999]))
-            else:
-                logger.fatal("Variable {} has unknown type {}.".format(variable, typename))
+            tree = file_.Get(class_)
+            if tree == None:
+                logger.fatal("Tree %s does not exist.", class_)
                 raise Exception
-            tree.SetBranchAddress(variable, values[-1])
 
-        if tree.GetLeaf(variable).GetTypeName() != "Float_t":
-            logger.fatal("Weight branch has unkown type.")
-            raise Exception
-        weight = array("f", [-999])
-        tree.SetBranchAddress(config_test["weight_branch"], weight)
-        uncertainty = array('f', [-999])
-        tree.SetBranchAddress(config_test['target_uncertainty'], uncertainty)
+            values = []
+            for variable in config_train["variables"]:
+                typename = tree.GetLeaf(variable).GetTypeName()
+                if  typename == "Float_t":
+                    values.append(array("f", [-999]))
+                elif typename == "Int_t":
+                    values.append(array("i", [-999]))
+                else:
+                    logger.fatal("Variable {} has unknown type {}.".format(variable, typename))
+                    raise Exception
+                tree.SetBranchAddress(variable, values[-1])
 
-        for i_event in range(tree.GetEntries()):
-            tree.GetEntry(i_event)
+            if tree.GetLeaf(variable).GetTypeName() != "Float_t":
+                logger.fatal("Weight branch has unkown type.")
+                raise Exception
+            weight = array("f", [-999])
+            tree.SetBranchAddress(config_test["weight_branch"], weight)
+            uncertainty = array('f', [-999])
+            tree.SetBranchAddress(config_test['target_uncertainty'], uncertainty)
 
-            values_stacked = np.hstack(values).reshape(1, len(values))
-            values_nom = preprocessing.transform(values_stacked)
-            response_nom = np.squeeze(model.predict(values_nom))
-            max_index = np.argmax(response_nom)
-            max_value = np.max(response_nom)
-            predicted_class = classes[max_index]
-            if predicted_class == 'ggh' and class_ == 'ggh':
-                all_classes[predicted_class][class_]['nom'].append(max_value)
-                all_weights[predicted_class][class_]['nom'].append(weight[0] * class_weights[class_] / 3.)
-            else:
-                all_classes[predicted_class][class_].append(max_value)
-                all_weights[predicted_class][class_].append(weight[0] * class_weights[class_])
+            for i_event in range(tree.GetEntries()):
+                tree.GetEntry(i_event)
 
-            if class_ == 'ggh':
-                values_stacked_up = values_stacked * uncertainty[0]
-                values_stacked_down = values_stacked * 1./float(uncertainty[0])
-                values_up = preprocessing.transform(values_stacked_up)
-                values_down = preprocessing.transform(values_stacked_down)
-                response_down = np.squeeze(model.predict(values_down))
-                response_up = np.squeeze(model.predict(values_up))
-                max_index_down = np.argmax(response_down)
-                max_value_down = np.max(response_down)
-                predicted_class_down = classes[max_index_down]
-                if predicted_class_down == 'ggh':
-                    all_classes[predicted_class_down][class_]['down'].append(max_value_down)
-                    all_weights[predicted_class_down][class_]['down'].append(weight[0] * class_weights[class_] / 3.)
-                max_index_up = np.argmax(response_up)
-                max_value_up = np.max(response_up)
-                predicted_class_up = classes[max_index_up]
-                if predicted_class_up == 'ggh':
-                    all_classes[predicted_class_up][class_]['up'].append(max_value_up)
-                    all_weights[predicted_class_up][class_]['up'].append(weight[0] * class_weights[class_] / 3.)
+                values_stacked = np.hstack(values).reshape(1, len(values))
+                values_nom = preprocessing.transform(values_stacked)
+                response_nom = np.squeeze(model.predict(values_nom))
+                max_index = np.argmax(response_nom)
+                max_value = np.max(response_nom)
+                predicted_class = classes[max_index]
+                if predicted_class == 'ggh' and class_ == 'ggh':
+                    all_classes[predicted_class][class_]['nom'].append(max_value)
+                    all_weights[predicted_class][class_]['nom'].append(weight[0] * class_weights[class_] / 3.)
+                else:
+                    all_classes[predicted_class][class_].append(max_value)
+                    all_weights[predicted_class][class_].append(weight[0] * class_weights[class_])
 
-    for key, item in all_classes.items():
-        logger.debug('Getting histogram of class {}'.format(key))
-        if key == 'ggh':
-            weight_dictionary = all_weights[key]
-            labels = ['ggh_nom', 'ggh_up', 'ggh_down', 'qqh', 'ztt', 'zll', 'w', 'tt', 'ss', 'misc']
-            output_path = os.path.join(config_train['output_path'], 'fold{}_ratios_decorrelated_{}'.format(args.fold, key))
-            plot_ratios(key, item, classes=classes, weights = weight_dictionary, output_path=output_path, nbins=30)
+                if class_ == 'ggh':
+                    values_stacked_up = values_stacked * uncertainty[0]*1.5
+                    values_stacked_down = values_stacked * 1./(float(uncertainty[0]*1.5))
+                    print(values_stacked, values_stacked_up, values_stacked_down)
+                    values_up = preprocessing.transform(values_stacked_up)
+                    values_down = preprocessing.transform(values_stacked_down)
+                    response_down = np.squeeze(model.predict(values_down))
+                    response_up = np.squeeze(model.predict(values_up))
+                    max_index_down = np.argmax(response_down)
+                    max_value_down = np.max(response_down)
+                    predicted_class_down = classes[max_index_down]
+                    if predicted_class_down == 'ggh':
+                        all_classes[predicted_class_down][class_]['down'].append(max_value_down)
+                        all_weights[predicted_class_down][class_]['down'].append(weight[0] * class_weights[class_] / 3.)
+                    max_index_up = np.argmax(response_up)
+                    max_value_up = np.max(response_up)
+                    predicted_class_up = classes[max_index_up]
+                    if predicted_class_up == 'ggh':
+                        all_classes[predicted_class_up][class_]['up'].append(max_value_up)
+                        all_weights[predicted_class_up][class_]['up'].append(weight[0] * class_weights[class_] / 3.)
+
+        for class_key, class_ in all_classes.items():
+            logger.debug('Getting histogram of class {}'.format(class_key))
+            if class_key == 'ggh':
+                weight_dictionary = all_weights[class_key]
+                #labels = ['ggh_nom', 'ggh_up', 'ggh_down', 'qqh', 'ztt', 'zll', 'w', 'tt', 'ss', 'misc']
+                output_path = os.path.join(config_train['output_path'], 'fold{}_ratios_{}_{}_l={}'.format(args.fold, model_key, class_key, lam))
+                plot_ratios(class_key, class_, classes=classes, weights = weight_dictionary, output_path=output_path, nbins=30)
 
 
 if __name__ == "__main__":

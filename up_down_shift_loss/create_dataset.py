@@ -10,14 +10,12 @@ import os
 import pickle
 import numpy as np
 
-import pivot_models
-
 
 def parse_arguments():
     logger.debug("Parse arguments.")
     parser = argparse.ArgumentParser(
         description="Train pivot adversarial network")
-    parser.add_argument("config", help="Path to training config file")
+    parser.add_argument("config_training", help="Path to training config file")
     parser.add_argument("fold", type=int, help="Select the fold to be trained")
     return parser.parse_args()
 
@@ -39,39 +37,6 @@ def setup_logging(level, output_file=None):
         file_handler = logging.FileHandler(output_file, "w")
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
-
-
-def plot_losses(losses, save_path, lam):
-    import matplotlib as mpl
-    mpl.use('Agg')
-    import matplotlib.pyplot as plt
-    plt.rcParams["figure.figsize"] = (6, 6)
-    plt.rcParams["font.size"] = 16.0
-    ax1 = plt.subplot(311)
-    values = np.array(losses["L_f"])
-    plt.plot(range(len(values)), values, label=r"$L_f$", color="blue")
-    plt.legend(loc="upper right")
-    plt.ylabel('loss')
-
-    ax2 = plt.subplot(312, sharex=ax1)
-    values = np.array(losses["L_r"])
-    plt.plot(range(len(values)), values, label=r"$L_r$", color="green")
-    plt.legend(loc="upper right")
-    plt.ylabel('loss')
-
-    ax3 = plt.subplot(313, sharex=ax1)
-    values = np.array(losses["L_f - L_r"])
-    plt.plot(range(len(values)), values, label=r"$L_f - \lambda L_r$", color="red")
-    plt.legend(loc="upper right")
-    plt.xlabel('epochs')
-    plt.ylabel('loss')
-
-    path_png = os.path.join(save_path, 'losses-l={}.png'.format(lam))
-    path_pdf = os.path.join(save_path, 'losses-l={}.pdf'.format(lam))
-
-    plt.savefig(path_png, bbox_inches='tight')
-    plt.savefig(path_pdf, bbox_inches='tight')
-
 
 def main(args, config):
     # Set seed and import packages
@@ -101,7 +66,8 @@ def main(args, config):
     x = []
     y = []
     w = []
-    z = []
+    z_up = []
+    z_down = []
     rfile = ROOT.TFile(filename, "READ")
     classes = config["classes"]
     for i_class, class_ in enumerate(classes):
@@ -122,55 +88,44 @@ def main(args, config):
         w_class = np.zeros((tree.GetEntries(), 1))
         w_conv = root_numpy.tree2array(
             tree, branches=[config["event_weights"]])
-        if class_ == 'ggh':
-            w_class[:,0] = w_conv[config["event_weights"]] * config["class_weights"][class_] / 3.
-            w.append(w_class)
-            w.append(w_class)
-        else:
-            w_class[:, 0] = w_conv[config["event_weights"]] * config["class_weights"][class_]
+        # if class_ == 'ggh':
+        #     w_class[:,0] = w_conv[config["event_weights"]] * config["class_weights"][class_] / 3.
+        #     w.append(w_class)
+        #     w.append(w_class)
+        # else:
+        w_class[:, 0] = w_conv[config["event_weights"]] * config["class_weights"][class_]
         w.append(w_class)
 
         # Get systematic uncertainty
 
-        z_class = np.zeros((tree.GetEntries(),2))
-        z_class[:,0] = 1
-        z.append(z_class)
+        z_class = np.ones((tree.GetEntries(),1))
         if class_ == 'ggh':
-            logger.info('Applying uncertainties to input parameters for class {}'.format(class_))
+            logger.info('Getting up and down weights for class {}'.format(class_))
             uncertainty_class = np.zeros((tree.GetEntries()))
             uncertainty_conv = root_numpy.tree2array(
                 tree, branches=[config['target_uncertainty']]
             )
-            uncertainty_class[:] = uncertainty_conv[config['target_uncertainty']]
-            print(uncertainty_class)
-            x_up = x_class
-            for j,uncertainty in enumerate(uncertainty_class):
-                x_up[j] *= (uncertainty*1.5)
-            x.append(x_up)
-            z_class_up = np.zeros((tree.GetEntries(),2))
-            z_class_up[:,1] = 1
-            z.append(z_class_up)
-            x_down = x_class
-            for j,uncertainty in enumerate(uncertainty_class):
-                x_down[j] *= 1./(float(uncertainty)*1.5)
-            x.append(x_down)
-            z_class_down = np.zeros((tree.GetEntries(),2))
-            z_class_down[:,1] = 1
-            z.append(z_class_down)
+            z_class_up = np.ones((tree.GetEntries(),1))
+            z_class_up[:,0] = uncertainty_conv[config['target_uncertainty']]
+            z_up.append(z_class_up)
+
+            z_class_down = np.ones((tree.GetEntries(),1))
+            z_class_down[:,0] = 1./uncertainty_conv[config['target_uncertainty']]
+            z_down.append(z_class_down)
+        else:
+            z_up.append(z_class)
+            z_down.append(z_class)
 
         # Get targets for this class
         y_class = np.zeros((tree.GetEntries(), len(classes)))
         y_class[:, i_class] = np.ones((tree.GetEntries()))
-        if class_ == 'ggh':
-            y.append(y_class)
-            y.append(y_class)
         y.append(y_class)
 
-    print(z)
     # Stack inputs, targets and weights to a Keras-readable dataset
     x = np.vstack(x)  # inputs
     y = np.vstack(y)  # targets
-    z = np.vstack(z)  # adversary targets
+    z_up = np.vstack(z_up).squeeze()  # adversary targets
+    z_down = np.vstack(z_down).squeeze() # adversary targets
     w = np.vstack(w) * config["global_weight_scale"]  # weights
     w = np.squeeze(w)  # needed to get weights into keras
 
@@ -220,69 +175,22 @@ def main(args, config):
     pickle.dump(scaler, open(path_preprocessing, 'wb'))
 
     # Split data in training and testing
-    x_train, x_test, y_train, y_test, w_train, w_test, z_train, z_test = model_selection.train_test_split(
+    x_train, x_test, y_train, y_test, w_train, w_test, z_up_train, z_up_test, z_down_train, z_down_test = model_selection.train_test_split(
         x,
         y,
         w,
-        z,
+        z_up,
+        z_down,
         test_size=1.0 - config["train_test_split"],
         random_state=int(config["seed"]))
 
-    # Train model
-    logger.info("Train keras model %s.", config["model"]["name"])
+    path = os.path.join(config['output_path'], 'fold{}_train.pickle'.format(args.fold))
+    pickle.dump([x_train, y_train, w_train, z_up_train, z_down_train], open(path, 'wb'))
 
-    if config["model"]["batch_size"] < 0:
-        batch_size = x_train.shape[0]
-    else:
-        batch_size = config["model"]["batch_size"]
-
-    lambda_parameter = config["model"]["lambda"]
-
-    logger.info("Lambda parameter is {}".format(lambda_parameter))
-
-    epochs = config['model']['epochs']
-    dropout = config['model']['dropout']
-
-    model_impl = getattr(pivot_models, config["model"]["name"])
-
-    num_adv_outputs = z_train.shape[1]
-
-    model = model_impl(x_train.shape[1], len(classes), num_adv_outputs, lambda_parameter, dropout)
-    model.summary()
-    model.pretrain_classifier(x_train, y_train, sample_weights=w_train, batch_size=batch_size, path=output_path, fold=args.fold, epochs=epochs, verbose=1)
-    if lambda_parameter > 0.0:
-        model.pretrain_adversary(x_train[(y_train[:,0] == 1)], z_train[(y_train[:,0] == 1)], class_weights={0: 2.,1: 1.}, epochs=epochs, verbose=1)
-        losses = model.evaluate_adversary(x_test[(y_test[:,0] == 1)], z_test[(y_test[:,0] == 1)])
-        logger.info('Evaluation of adversary gives the following losses: {}'.format(losses))
-
-    w_train_adv = np.ones((len(w_train)))
-    w_train_adv[(z_train[:, 0] == 1)] = 2.
-
-    history = model.fit(
-        x_train,
-        x_train[(y_train[:,0] == 1)],
-        y_train,
-        z_train,
-        z_train[(y_train[:,0] == 1)],
-        sample_weights=[w_train, w_train_adv],
-        class_weights_adv = {0: 2.,1: 1.},
-        validation_data=(x_test, y_test, z_test, w_test),
-        batch_size=batch_size,
-        n_iter=config['model']['n_iter'],
-        verbose=1)
-
-    # Plot metrics
-
-    plot_losses(history, save_path=output_path, lam=lambda_parameter)
-
-    # Save model
-
-    logger.info("Write model to {}.".format(output_path))
-    model.save(output_path, args.fold)
-
+    path = os.path.join(config['output_path'], 'fold{}_test.pickle'.format(args.fold))
+    pickle.dump([x_test, y_test, w_test, z_up_test, z_down_test], open(path, 'wb'))
 
 if __name__ == "__main__":
-    setup_logging(logging.DEBUG)
     args = parse_arguments()
-    config = parse_config(args.config)
-    main(args, config)
+    config_train = parse_config(args.config_training)
+    main(args, config_train)
