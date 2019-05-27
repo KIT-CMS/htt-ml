@@ -152,12 +152,6 @@ def main(args, config):
         #os.mkdir(output_path)
         os.makedirs(output_path)
 
-    output_path_json = config['output_path_json']
-    if not os.path.exists(output_path_json):
-        #os.mkdir(output_path_json)
-        os.makedirs(output_path_json)
-
-
     # Load training dataset
     filename = config["datasets"][args.fold]
     logger.debug("Load training dataset from %s.", filename)
