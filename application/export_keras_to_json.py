@@ -41,8 +41,8 @@ def main(args, config_training, config_application):
         variables = copy.deepcopy(variables_template)
         scaler = pickle.load(open(p, "rb"))
         for variable,offset,scale in zip(variables["inputs"],scaler.mean_,scaler.scale_): # NOTE: offsets & scales are in the same order as in config_training["variables"]
-            variable["offset"] = offset
-            variable["scale"] = scale
+            variable["offset"] = -offset
+            variable["scale"] = 1.0/scale
         with open(v, "w") as f:
             f.write(json.dumps(variables))
             f.close()
