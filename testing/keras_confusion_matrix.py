@@ -150,9 +150,9 @@ def main(args, config_test, config_train):
                 raise Exception
             tree.SetBranchAddress(variable, values[-1])
 
-        if tree.GetLeaf(variable).GetTypeName() != "Float_t":
-            logger.fatal("Weight branch has unkown type.")
-            raise Exception
+        # if tree.GetLeaf(variable).GetTypeName() != "Float_t":
+        #     logger.fatal("Weight branch {} has unkown type {}.".format(variable, tree.GetLeaf(variable).GetTypeName()))
+        #     raise Exception
         weight = array("f", [-999])
         tree.SetBranchAddress(config_test["weight_branch"], weight)
 
