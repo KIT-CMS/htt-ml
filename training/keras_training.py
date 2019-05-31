@@ -276,7 +276,6 @@ def main(args, config):
         shuffle=True,
         callbacks=callbacks)
 
-<<<<<<< HEAD
     # Plot metrics
 
     metric_data = metrics.get_data()
@@ -287,19 +286,7 @@ def main(args, config):
                           variables=classes,
                           y_labels=['F1-Score', 'Recall/Efficiency', 'Precision/Purity'],
                           number_of_inputs=len(variables))
-=======
-    # Plot loss
-    epochs = range(1, len(history.history["loss"]) + 1)
-    plt.plot(epochs, history.history["loss"], lw=3, label="Training loss")
-    plt.plot(
-        epochs, history.history["val_loss"], lw=3, label="Validation loss")
-    plt.xlabel("Epoch"), plt.ylabel("Loss")
-    path_plot = os.path.join(config["output_path"],
-                             "fold{}_loss".format(args.fold))
-    plt.legend()
-    plt.savefig(path_plot+".png", bbox_inches="tight")
-    plt.savefig(path_plot+".pdf", bbox_inches="tight")
->>>>>>> master
+
 
     # Save model
     if not "save_best_only" in config["model"]:
