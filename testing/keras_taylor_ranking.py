@@ -122,7 +122,7 @@ def main(args, config_test, config_train):
         if tree == None:
             logger.fatal("Tree %s does not exist.", class_)
             raise Exception
-        friend_trees_names = [k.GetName() for k in file_.GetListOfKeys() if "_".join([class_,"friend"]) in k.GetName()]
+        friend_trees_names = [k.GetName() for k in rfile.GetListOfKeys() if k.GetName().startswith("_".join([class_,"friend"]))]
         for friend in friend_trees_names:
             tree.AddFriend(friend)
 
