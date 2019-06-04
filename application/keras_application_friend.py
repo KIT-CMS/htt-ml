@@ -94,10 +94,6 @@ def main(args, config_dataset, config_training, config_application):
 
     tree_dir = os.path.dirname(args.tree)
 
-    if output_filename == '/ceph/swozniewski/SM_Htautau/ntuples/Artus17_Jan/merged_fixedjets/WminusHToTauTauM125_RunIIFall17MiniAODv2_PU2017_13TeV_MINIAOD_powheg-pythia8_v1/WminusHToTauTauM125_RunIIFall17MiniAODv2_PU2017_13TeV_MINIAOD_powheg-pythia8_v1.root':
-        logger.setLevel(logging.DEBUG)
-        logger.debug('Set debug level for tree {}'.format(output_filename))
-
     if file_output.mkdir(tree_dir) == None:
         raise Exception("Directory {} did already exist for file {}.".format(
             tree_dir, args.input))

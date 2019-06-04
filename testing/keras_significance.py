@@ -126,6 +126,9 @@ def main(args, config_test, config_train):
         if tree == None:
             logger.fatal("Tree %s does not exist.", class_)
             raise Exception
+        friend_trees_names = [k.GetName() for k in file_.GetListOfKeys() if "_".join([class_,"friend"]) in k.GetName()]
+        for friend in friend_trees_names:
+            tree.AddFriend(friend)
 
         values = []
         for variable in config_train["variables"]:
@@ -139,9 +142,6 @@ def main(args, config_test, config_train):
                 raise Exception
             tree.SetBranchAddress(variable, values[-1])
 
-        if tree.GetLeaf(variable).GetTypeName() != "Float_t":
-            logger.fatal("Weight branch has unkown type.")
-            raise Exception
         weight = array("f", [-999])
         tree.SetBranchAddress(config_test["weight_branch"], weight)
 
