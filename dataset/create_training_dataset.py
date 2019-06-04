@@ -107,10 +107,11 @@ def main(args, config):
             # Rename chain to process name and write to output file
             logger.debug("Write output file for this process and fold.")
             chain_skimmed.SetName(config["processes"][process]["class"])
-            chain_skimmed.Write()
+            chain_skimmed.Write("",ROOT.TObject.kOverwrite)
             for index, d in enumerate(friendchains_skimmed):
                 friendchains_skimmed[d].SetName("_".join([config["processes"][process]["class"], "friend", str(index)]))
-                friendchains_skimmed[d].Write()
+                friendchains_skimmed[d].Write("",ROOT.TObject.kOverwrite)
+            file_.Delete("ntuple;*")
             file_.Close()
 
         # Combine all skimmed files using `hadd`
