@@ -70,7 +70,7 @@ def main(args, config_test, config_train):
         if tree == None:
             logger.fatal("Tree %s does not exist.", class_)
             raise Exception
-        friend_trees_names = [k.GetName() for k in file_.GetListOfKeys() if "_".join([class_,"friend"]) in k.GetName()]
+        friend_trees_names = [k.GetName() for k in file_.GetListOfKeys() if k.GetName().startswith("_".join([class_,"friend"]))]
         for friend in friend_trees_names:
             tree.AddFriend(friend)
 
@@ -137,6 +137,8 @@ def main(args, config_test, config_train):
     model_dictionary["scores_by_class"] = class_dictionary
     json_path = os.path.join(config_train["output_path_json"], "pruning_information_fold{}.json".format(args.fold))
 
+    logger.info('Exporting results to {}'.format(json_path))
+
     import json
 
     if not os.path.exists(json_path):
@@ -152,6 +154,8 @@ def main(args, config_test, config_train):
     data = check_for_duplicates(data=data, current_model_dictionary=model_dictionary)
     with open(json_path, 'w') as f:
         json.dump(data, f)
+    logger.info('Done, exiting...')
+    exit()
 
 
 if __name__ == "__main__":

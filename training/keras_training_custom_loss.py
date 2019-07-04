@@ -136,6 +136,11 @@ def main(args, config):
     ROOT.PyConfig.IgnoreCommandLineOptions = True  # disable ROOT internal argument parser
     import root_numpy
 
+    # NOTE: Matplotlib needs to be imported after Keras/TensorFlow because of conflicting libraries #TODO: Works now for LCG94?
+    import matplotlib as mpl
+    mpl.use('Agg')
+    import matplotlib.pyplot as plt
+
     from sklearn import preprocessing, model_selection
     import keras_models
     from keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint
@@ -152,6 +157,11 @@ def main(args, config):
         #os.mkdir(output_path)
         os.makedirs(output_path)
 
+    output_path_json = config['output_path_json']
+    if not os.path.exists(output_path_json):
+        #os.mkdir(output_path_json)
+        os.makedirs(output_path_json)
+
     # Load training dataset
     filename = config["datasets"][args.fold]
     logger.debug("Load training dataset from %s.", filename)
@@ -166,31 +176,29 @@ def main(args, config):
         if tree == None:
             logger.fatal("Tree %s not found in file %s.", class_, filename)
             raise Exception
+        friend_trees_names = [k.GetName() for k in rfile.GetListOfKeys() if k.GetName().startswith("_".join([class_,"friend"]))]
+        for friend in friend_trees_names:
+            tree.AddFriend(friend)
 
         # Get inputs for this class
-        #x_class = np.zeros((tree.GetEntries(), len(variables)))
-        entries = tree.GetEntries() #if tree.GetEntries() < 8000 else 8000
-        x_class = np.zeros((entries, len(variables)))
+        x_class = np.zeros((tree.GetEntries(), len(variables)))
         x_conv = root_numpy.tree2array(tree, branches=variables)
         for i_var, var in enumerate(variables):
-            x_class[:, i_var] = x_conv[var][:entries]
+            x_class[:, i_var] = x_conv[var]
         x.append(x_class)
 
         # Get weights
-        #w_class = np.zeros((tree.GetEntries(), 1))
-        w_class = np.zeros((entries, 1))
+        w_class = np.zeros((tree.GetEntries(), 1))
         w_conv = root_numpy.tree2array(
             tree, branches=[config["event_weights"]])
         w_class[:,
-                0] = w_conv[config["event_weights"]][:entries] * config["class_weights"][class_]
+                0] = w_conv[config["event_weights"]] * config["class_weights"][class_]
         w.append(w_class)
 
         # Get targets for this class
-        #y_class = np.zeros((tree.GetEntries(), len(classes)))
-        y_class = np.zeros((entries, len(classes)))
-        y_class[:, i_class] = np.ones((entries))
+        y_class = np.zeros((tree.GetEntries(), len(classes)))
+        y_class[:, i_class] = np.ones((tree.GetEntries()))
         y.append(y_class)
-
     # Stack inputs, targets and weights to a Keras-readable dataset
     x = np.vstack(x)  # inputs
     y = np.vstack(y)  # targets
@@ -292,19 +300,19 @@ def main(args, config):
         learning_rate = 1e-3
 
     # Adding up a list of y_train due to multiple losses
-    y_train_list = []
-    y_test_list = []
-    for class_ in classes:
-        y_train_list.append(y_train)
-        y_test_list.append(y_test)
+    # y_train_list = []
+    # y_test_list = []
+    # for class_ in classes:
+    #     y_train_list.append(y_train)
+    #     y_test_list.append(y_test)
 
     model_impl = getattr(keras_models, config["model"]["name"])
     model = model_impl(len(variables), len(classes), classes, learning_rate)
     model.summary()
     history = model.fit(
         [x_train, w_train],
-        y_train_list,
-        validation_data=([x_test, w_test], y_test_list),
+        y_train,
+        validation_data=([x_test, w_test], y_test),
         batch_size=batch_size,
         nb_epoch=config["model"]["epochs"],
         shuffle=True,
@@ -313,10 +321,11 @@ def main(args, config):
     # Plot metrics
 
     variable_names = []
-    for class_ in classes:
-        variable_names.append('{}_loss'.format(class_))
+    for variable_name in history.history.keys():
+        variable_names.append(variable_name)
 
-    draw_validation_losses(variable_names,history, y_label='Loss', number_of_inputs=len(variables))
+
+    #draw_validation_losses(variable_names,history, y_label='Loss', number_of_inputs=len(variables))
     draw_training_losses(variable_names, history, y_label='Loss', number_of_inputs=len(variables))
 
     draw_plots(variable_name="loss", history=history, y_label="Loss", number_of_inputs=len(variables))

@@ -115,7 +115,7 @@ class significance(Callback):
         y_predict = np.asarray(self.model.predict([X_val, event_weights]))
         #y_predict_train = np.asarray(self.model.predict([self.x_train, self.w_train]))
 
-        class_significance = calculate_significance_per_class(y_true= y_val, y_pred= y_predict[0], event_weights=event_weights, number_of_labels=np.shape(y_val)[1])
+        class_significance = calculate_significance_per_class(y_true= y_val, y_pred= y_predict, event_weights=event_weights, number_of_labels=np.shape(y_val)[1])
         #class_significance_train = calculate_significance_per_class(y_true= self.y_train, y_pred= y_predict_train[0], event_weights=self.w_train, number_of_labels=np.shape(self.y_train)[1])
 
         print(" - Significance: {}".format(class_significance))
@@ -152,6 +152,10 @@ def ams_loss(y_true, y_pred, event_weights, class_label, br=0.):
 
     return ams_score_negative
 
+def loss_ce(y_true, y_pred, w):
+    return K.mean(K.mean(categorical_crossentropy(y_true, y_pred), axis=-1) * w)
+
+
 def significance_loss(y_true, y_pred, event_weights, class_label):
     highest_values = K.max(y_pred, axis=-1)
 
@@ -162,9 +166,7 @@ def significance_loss(y_true, y_pred, event_weights, class_label):
     signals = label_mask*label_mask_true*highest_values*event_weights
     all_events = label_mask*highest_values*event_weights
 
-
     signal_sum = K.sum(signals)
-
 
     all_sum = K.sum(all_events)
     significance_positive = (signal_sum) / (all_sum + K.epsilon())
@@ -173,13 +175,13 @@ def significance_loss(y_true, y_pred, event_weights, class_label):
 
     return significance_negative
 
-def significance_curry_loss_2(number_of_labels):
+def significance_curry_loss_single(number_of_labels):
     def significance(y_true, y_pred, weights):
         total_loss = 0
         for i in range(number_of_labels):
-            loss = significance_loss(y_true, y_pred, weights, i)
+            loss = significance_loss(y_true, y_pred, event_weights=weights, class_label=i)
             total_loss += loss
-        return total_loss
+        return loss_ce(y_true, y_pred, weights) + total_loss
 
     return significance
 
@@ -197,6 +199,15 @@ def ams_curry_loss(class_label, br = 1.0):
 
     return ams
 
+def ams_curry_loss_single(number_of_labels, br = 1.0):
+    def ams(y_true, y_pred, weights):
+        total_loss = 0
+        for i in range(number_of_labels):
+            loss = ams_loss(y_true, y_pred, event_weights=weights, class_label=i, br=br)
+            total_loss += loss
+        return total_loss
+
+    return ams
 
 def focal_loss(gamma=2., alpha=.25):
     def focal_loss_fixed(y_true, y_pred):

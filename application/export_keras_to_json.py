@@ -5,6 +5,7 @@ import json
 import copy
 
 from keras.models import load_model
+import keras2sequential
 
 
 def parse_arguments():
@@ -32,10 +33,18 @@ def main(args, config_training, config_application):
                              config_application["variable_exports"],
                              config_application["architecture_exports"]):
         # export weights in .h5 format & model in .json format
-        model = load_model(c)
-        model.save_weights(w)
+        model = load_model(c, compile=False)
+        model_type = model.__class__.__name__
+        if model_type != "Sequential":
+            model = keras2sequential.model2sequential(model)
+            assert model.__class__.__name__ == 'Sequential'
+            save_path = c.split('.')[0]+'_sequential.h5'
+            model.save(filepath=save_path)
+            print('Changed model type to sequential and saved it to {}'.format(save_path))
+        architecture = model.to_json()
+        model.save_weights(w, overwrite=True)
         with open(a, "w") as f:
-            f.write(model.to_json())
+            f.write(architecture)
             f.close()
         # export scale & offsets vor variables
         variables = copy.deepcopy(variables_template)

@@ -201,6 +201,36 @@ def smhtt_significance(num_inputs, num_outputs, output_names, learning_rate = 1e
     model.compile(loss=loss_dict, optimizer=Adam(lr=learning_rate), loss_weights=None)
     return model
 
+def smhtt_significance_single_output(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
+    inputs = Input(shape=(num_inputs,))
+    weights = Input(shape=(1,))
+
+    layer_1 = Dense(200, activation=None, kernel_regularizer=None)(inputs)
+    #layer_1 = BatchNormalization()(layer_1)
+    layer_1 = Activation('relu')(layer_1)
+    #layer_1 = Dropout(rate=0.3)(layer_1)
+    layer_2 = Dense(200, activation=None, kernel_regularizer=None)(layer_1)
+    #layer_2 = BatchNormalization()(layer_2)
+    layer_2 = Activation('relu')(layer_2)
+    #layer_2 = Dropout(rate=0.3)(layer_2)
+    output_0 = Dense(num_outputs, activation=None, kernel_regularizer=None, name="dense_out")(layer_2)
+    #output_0 = BatchNormalization(name='batchnorm_out')(output_0)
+    output_0 = Activation('softmax', name='out')(output_0)
+
+    model = Model(inputs=[inputs, weights], outputs=output_0)
+
+    metrics = []
+    loss_ce_ = wrapped_partial(loss_ce, w=weights)
+    metrics.append(loss_ce_)
+    for i, name in enumerate(output_names):
+        variable_loss = wrapped_partial(significance_loss, event_weights=weights, class_label=i)
+        metrics.append(variable_loss)
+
+    loss = wrapped_partial(significance_curry_loss_single(number_of_labels=num_outputs), weights=weights)
+
+    model.compile(loss=loss, optimizer=Adam(lr=learning_rate), metrics=metrics)
+    return model
+
 def smhtt_ams(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
     inputs = Input(shape=(num_inputs,))
     weights = Input(shape=(1,))
@@ -231,6 +261,34 @@ def smhtt_ams(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
         loss_dict[name] = wrapped_partial(ams_curry_loss(class_label=i), weights=weights)
 
     model.compile(loss=loss_dict, optimizer=Adam(lr=learning_rate), loss_weights=None)
+    return model
+
+def smhtt_ams_single_output(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
+    inputs = Input(shape=(num_inputs,))
+    weights = Input(shape=(1,))
+
+    layer_1 = Dense(200, activation=None, kernel_regularizer=None)(inputs)
+    layer_1 = BatchNormalization()(layer_1)
+    layer_1 = Activation('relu')(layer_1)
+    #layer_1 = Dropout(rate=0.3)(layer_1)
+    layer_2 = Dense(200, activation=None, kernel_regularizer=None)(layer_1)
+    layer_2 = BatchNormalization()(layer_2)
+    layer_2 = Activation('relu')(layer_2)
+    #layer_2 = Dropout(rate=0.3)(layer_2)
+    output_0 = Dense(num_outputs, activation=None, kernel_regularizer=None, name="dense_out")(layer_2)
+    output_0 = BatchNormalization(name='batchnorm_out')(output_0)
+    output_0 = Activation('softmax', name='out')(output_0)
+
+    model = Model(inputs=[inputs, weights], outputs=output_0)
+
+    metrics = []
+    for i, name in enumerate(output_names):
+        variable_loss = wrapped_partial(ams_loss, event_weights=weights, class_label=i, br=1.0)
+        metrics.append(variable_loss)
+
+    loss = wrapped_partial(ams_curry_loss_single(number_of_labels=num_outputs), weights=weights)
+
+    model.compile(loss=loss, optimizer=Adam(lr=learning_rate), metrics=metrics)
     return model
 
 

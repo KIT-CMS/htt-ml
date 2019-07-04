@@ -161,8 +161,8 @@ def main(args, config_test, config_train):
             values_stacked = np.hstack(values).reshape(1, len(values))
             values_preprocessed = preprocessing.transform(values_stacked)
             response = model.predict(values_preprocessed)
-            if len(response) == 3:
-                response = response[0]
+            # if len(response) == 3:
+            #     response = response[0]
             response = np.squeeze(response)
             max_index = np.argmax(response)
             confusion[i_class, max_index] += weight[0]
