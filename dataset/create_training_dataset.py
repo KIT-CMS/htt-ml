@@ -2,7 +2,7 @@
 
 import ROOT
 ROOT.PyConfig.IgnoreCommandLineOptions = True  # disable ROOT internal argument parser
-
+ROOT.ROOT.EnableImplicitMT(); # Tell ROOT you want to go parallel
 import argparse
 import yaml
 import os
@@ -42,26 +42,37 @@ def main(args, config):
             created_files.append(
                 os.path.join(config["output_path"],
                              "merge_fold{}_{}.root".format(num_fold, process)))
-            file_ = ROOT.TFile(created_files[-1], "RECREATE")
 
             # Collect all files for this process in a chain. Create also chains for friend files
-            chain = ROOT.TChain(config["tree_path"])
+            chain = ROOT.TChain(config["tree_path"]) ## "mt_nominal/ntuple"
             friendchains = {}
-            for d in config["friend_paths"]:
-                friendchains[d] = ROOT.TChain(config["tree_path"])
+            for friendPath in config["friend_paths"]: ####/ceph/htautau/2017/nnscore_friends/
+                friendTreeName=os.path.basename(os.path.normpath(friendPath))
+                friendchains[friendTreeName] = ROOT.TChain(config["tree_path"])
 
+            #for each file, add ntuple TTree to the chain and do the same for the the friendTrees
             for filename in config["processes"][process]["files"]:
                 path = os.path.join(config["base_path"], filename)
                 if not os.path.exists(path):
                     logger.fatal("File does not exist: {}".format(path))
+                    raise Exception
                 chain.AddFile(path)
                 # Make sure, that friend files are put in the same order together
-                for d in friendchains:
-                    friendfile = os.path.join(d,filename)
-                    friendchains[d].AddFile(friendfile)
+                for friendPath in config["friend_paths"]:
+                    friendFileName = os.path.join(friendPath,filename)
+                    if not os.path.exists(friendFileName):
+                        logger.fatal("File does not exist: {}".format(friendFileName))
+                        raise Exception
+                    friendTreeName=os.path.basename(os.path.normpath(friendPath))
+                    friendchains[friendTreeName].AddFile(friendFileName)
 
-            chain_numentries = chain.GetEntries()
-            if not chain_numentries > 0:
+
+            for friendTreeName in friendchains.keys():
+                chain.AddFriend(friendchains[friendTreeName], friendTreeName)
+
+            rdf=ROOT.RDataFrame(chain)
+            chain_numentries = rdf.Count().GetValue()
+            if chain_numentries == 0:
                 logger.fatal(
                     "Chain (before skimming) does not contain any events.")
                 raise Exception
@@ -75,13 +86,9 @@ def main(args, config):
                 CUT_STRING=config["processes"][process]["cut_string"])
             logger.debug("Skim events with cut string: {}".format(cut_string))
 
-            chain_skimmed = chain.CopyTree(cut_string)
-            chain_skimmed_numentries = chain_skimmed.GetEntries()
-            friendchains_skimmed = {}
-            # Apply skim selection also to friend chains
-            for d in friendchains:
-                friendchains[d].AddFriend(chain)
-                friendchains_skimmed[d] = friendchains[d].CopyTree(cut_string)
+            rdf=rdf.Filter(cut_string)
+
+            chain_skimmed_numentries = rdf.Count().GetValue()
             if not chain_skimmed_numentries > 0:
                 logger.fatal(
                     "Chain (after skimming) does not contain any events.")
@@ -89,30 +96,15 @@ def main(args, config):
             logger.debug("Found {} events for process {} after skimming.".
                          format(chain_skimmed_numentries, process))
 
-            # Write training weight to new branch
+            # # Write training weight to new branch
             logger.debug("Add training weights with weight string: {}".format(
                 config["processes"][process]["weight_string"]))
-            formula = ROOT.TTreeFormula(
-                "training_weight",
-                config["processes"][process]["weight_string"], chain_skimmed)
-            training_weight = array('f', [-999.0])
-            branch_training_weight = chain_skimmed.Branch(
-                config["training_weight_branch"], training_weight,
-                config["training_weight_branch"] + "/F")
-            for i_event in range(chain_skimmed.GetEntries()):
-                chain_skimmed.GetEntry(i_event)
-                training_weight[0] = formula.EvalInstance()
-                branch_training_weight.Fill()
+            rdf=rdf.Define(config["training_weight_branch"],"(float)("+config["processes"][process]["weight_string"]+")")
 
-            # Rename chain to process name and write to output file
-            logger.debug("Write output file for this process and fold.")
-            chain_skimmed.SetName(config["processes"][process]["class"])
-            chain_skimmed.Write("",ROOT.TObject.kOverwrite)
-            for index, d in enumerate(friendchains_skimmed):
-                friendchains_skimmed[d].SetName("_".join([config["processes"][process]["class"], "friend", str(index)]))
-                friendchains_skimmed[d].Write("",ROOT.TObject.kOverwrite)
-            file_.Delete("ntuple;*")
-            file_.Close()
+            opt = ROOT.ROOT.RDF.RSnapshotOptions()
+            opt.fMode = "RECREATE"
+            rdf.Snapshot(config["processes"][process]["class"],created_files[-1],".*",opt)
+            logger.debug("snapshot created!")
 
         # Combine all skimmed files using `hadd`
         logger.debug("Call `hadd` to combine files of processes for fold {}.".
