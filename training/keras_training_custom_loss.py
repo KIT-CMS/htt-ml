@@ -3,10 +3,15 @@
 import logging
 logger = logging.getLogger("keras_training")
 
+import matplotlib as mpl
+mpl.use('Agg')
+import matplotlib.pyplot as plt
+
 import argparse
 import yaml
 import os
 import pickle
+import re
 from keras_custom_metrics import *
 
 def parse_arguments():
@@ -39,9 +44,9 @@ def setup_logging(level, output_file=None):
 def draw_plots(variable_name, history, y_label, number_of_inputs):
 
     # NOTE: Matplotlib needs to be imported after Keras/TensorFlow because of conflicting libraries
-    import matplotlib as mpl
-    mpl.use('Agg')
-    import matplotlib.pyplot as plt
+    # import matplotlib as mpl
+    # mpl.use('Agg')
+    # import matplotlib.pyplot as plt
 
     plt.clf()
 
@@ -57,46 +62,85 @@ def draw_plots(variable_name, history, y_label, number_of_inputs):
     plt.savefig(path_plot+".pdf", bbox_inches="tight")
 
 
-def draw_validation_losses(variable_names, history, y_label, number_of_inputs):
+def draw_validation_losses(variable_names, history, y_label, number_of_inputs, class_names):
     # NOTE: Matplotlib needs to be imported after Keras/TensorFlow because of conflicting libraries
-    import matplotlib as mpl
-    mpl.use('Agg')
-    import matplotlib.pyplot as plt
+    # import matplotlib as mpl
+    # mpl.use('Agg')
+    # import matplotlib.pyplot as plt
 
     plt.clf()
+    fig, ax1 = plt.subplots()
+    ax2 = ax1.twinx()
+    j=0
     for variable_name in variable_names:
         epochs = range(1, len(history.history[variable_name]) + 1)
-        plt.plot(
-            epochs, history.history["val_{}".format(variable_name)], lw=3, label="Validation {}".format(variable_name))
-    plt.xlabel("Epoch"), plt.ylabel(y_label)
+        if 'significance_loss' in variable_name:
+            digits = re.findall(r'\d', variable_name)
+            if digits:
+                digit = int(digits[0])
+                ax1.plot(
+                    epochs, history.history["{}".format(variable_name)], lw=3, label="Val {}".format(class_names[digit]))
+            else:
+                ax1.plot(
+                    epochs, history.history["{}".format(variable_name)], lw=3, label="Val {}".format(class_names[0]))
+        elif 'loss_ce' in variable_name:
+            ax2.plot(
+                epochs, history.history["{}".format(variable_name)], lw=3,
+                label="Val {}".format(variable_name), color='y')
+    plt.xlabel("Epoch")
+    ax1.set_ylabel('Significance-' + y_label)
+    ax2.set_ylabel('CE-' + y_label )
+    ax2.tick_params(axis='y', labelcolor='y')
     path_plot = os.path.join(config["output_path"],
-                             "fold{}_{}_{}variables".format(args.fold, 'validation_loss', number_of_inputs))
-    plt.legend()
+                             "fold{}_{}".format(args.fold, 'val_loss'))
+    ax1.legend(loc='upper right')
+    ax2.legend(loc='upper left')
     plt.savefig(path_plot + ".png", bbox_inches="tight")
     plt.savefig(path_plot + ".pdf", bbox_inches="tight")
+    fig.clf()
 
-def draw_training_losses(variable_names, history, y_label, number_of_inputs):
+def draw_training_losses(variable_names, history, y_label, number_of_inputs, class_names):
     # NOTE: Matplotlib needs to be imported after Keras/TensorFlow because of conflicting libraries
-    import matplotlib as mpl
-    mpl.use('Agg')
-    import matplotlib.pyplot as plt
+    # import matplotlib as mpl
+    # mpl.use('Agg')
+    # import matplotlib.pyplot as plt
 
     plt.clf()
+    fig, ax1 = plt.subplots()
+    ax2 = ax1.twinx()
+    j=0
     for variable_name in variable_names:
+        print(variable_name)
         epochs = range(1, len(history.history[variable_name]) + 1)
-        plt.plot(
-            epochs, history.history["{}".format(variable_name)], lw=3, label="Train {}".format(variable_name))
-    plt.xlabel("Epoch"), plt.ylabel(y_label)
+        if 'significance_loss' in variable_name:
+            digits = re.findall(r'\d', variable_name)
+            if digits:
+                digit = int(digits[0])
+                ax1.plot(
+                    epochs, history.history["{}".format(variable_name)], lw=3, label="Train {}".format(class_names[digit]))
+            else:
+                ax1.plot(
+                    epochs, history.history["{}".format(variable_name)], lw=3, label="Train {}".format(class_names[0]))
+        elif 'loss_ce' in variable_name:
+            ax2.plot(
+                epochs, history.history["{}".format(variable_name)], lw=3,
+                label="Train {}".format(variable_name), color='y')
+    plt.xlabel("Epoch")
+    ax1.set_ylabel('Significance-' + y_label)
+    ax2.set_ylabel('CE-' + y_label )
+    ax2.tick_params(axis='y', labelcolor='y')
     path_plot = os.path.join(config["output_path"],
-                             "fold{}_{}_{}variables".format(args.fold, 'train_loss', number_of_inputs))
-    plt.legend()
+                             "fold{}_{}".format(args.fold, 'train_loss'))
+    ax1.legend(loc='upper right')
+    ax2.legend(loc='upper left')
     plt.savefig(path_plot + ".png", bbox_inches="tight")
     plt.savefig(path_plot + ".pdf", bbox_inches="tight")
+    fig.clf()
 
 def draw_custom_callbacks(metric_data, metric_names, variables, y_labels, number_of_inputs):
-    import matplotlib as mpl
-    mpl.use('Agg')
-    import matplotlib.pyplot as plt
+    # import matplotlib as mpl
+    # mpl.use('Agg')
+    # import matplotlib.pyplot as plt
 
     epochs = range(1, len(metric_data) + 1)
 
@@ -116,13 +160,37 @@ def draw_custom_callbacks(metric_data, metric_names, variables, y_labels, number
         for variable_name in variables:
             plt.plot(epochs, list_of_metrics[metric_name][variable_name], lw=3, label="{}".format(variable_name))
         plt.xlabel("Epoch"), plt.ylabel(label_name)
-        plt.title("Validation score for {}".format(label_name))
+        #plt.title("Validation score for {}".format(label_name))
         path_plot = os.path.join(config["output_path"],
                                  "fold{}_{}_{}variables".format(args.fold, metric_name, number_of_inputs))
         plt.legend()
         plt.savefig(path_plot+".png", bbox_inches="tight")
         plt.savefig(path_plot+".pdf", bbox_inches="tight")
 
+def draw_significance_per_class(metric_data, metric_names, classes, y_labels):
+    epochs = range(1, len(metric_data) + 1)
+
+    list_of_metrics = dict()
+    for metric_name in metric_names:
+        list_of_metrics[metric_name] = dict()
+        for class_ in classes:
+            list_of_metrics[metric_name][class_] = []
+
+    for data_point in metric_data:
+        for metric_name in metric_names:
+            for i_class, class_ in enumerate(classes):
+                list_of_metrics[metric_name][class_].append(data_point[metric_name][str(i_class)])
+    for metric_name, label_name in zip(metric_names, y_labels):
+        plt.clf()
+        for class_ in classes:
+            plt.plot(epochs, list_of_metrics[metric_name][class_], lw=3, label="{}".format(class_))
+        plt.xlabel("Epoch"), plt.ylabel(label_name)
+        #plt.title("Validation score for {}".format(label_name))
+        path_plot = os.path.join(config["output_path"],
+                                 "fold{}_{}".format(args.fold, metric_name))
+        plt.legend()
+        plt.savefig(path_plot+".png", bbox_inches="tight")
+        plt.savefig(path_plot+".pdf", bbox_inches="tight")
 
 def main(args, config):
     # Set seed and import packages
@@ -137,9 +205,6 @@ def main(args, config):
     import root_numpy
 
     # NOTE: Matplotlib needs to be imported after Keras/TensorFlow because of conflicting libraries #TODO: Works now for LCG94?
-    import matplotlib as mpl
-    mpl.use('Agg')
-    import matplotlib.pyplot as plt
 
     from sklearn import preprocessing, model_selection
     import keras_models
@@ -320,15 +385,24 @@ def main(args, config):
 
     # Plot metrics
 
-    variable_names = []
+    significance_metric = metrics.get_data()
+
+    variable_names_train = []
+    variable_names_val = []
     for variable_name in history.history.keys():
-        variable_names.append(variable_name)
+        # if 'loss_ce' in variable_name:
+        #     continue
+        if 'val' in variable_name:
+            variable_names_val.append(variable_name)
+        else:
+            variable_names_train.append(variable_name)
 
-
-    #draw_validation_losses(variable_names,history, y_label='Loss', number_of_inputs=len(variables))
-    draw_training_losses(variable_names, history, y_label='Loss', number_of_inputs=len(variables))
+    #print(variable_names_train)
+    draw_validation_losses(variable_names_val,history, y_label='Loss', number_of_inputs=len(variables), class_names = classes)
+    draw_training_losses(variable_names_train, history, y_label='Loss', number_of_inputs=len(variables), class_names = classes)
 
     draw_plots(variable_name="loss", history=history, y_label="Loss", number_of_inputs=len(variables))
+    draw_significance_per_class(metric_data=significance_metric, metric_names=['Significance'], classes=classes, y_labels='Loss')
 
 
     if not "save_best_only" in config["model"]:

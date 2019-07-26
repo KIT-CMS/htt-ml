@@ -7,9 +7,10 @@ import argparse
 import yaml
 import os
 import pickle
-from keras.callbacks import Callback
-import numpy as np
-from sklearn.metrics import precision_score, recall_score, f1_score
+
+import matplotlib as mpl
+mpl.use('Agg')
+import matplotlib.pyplot as plt
 
 from keras_custom_metrics import Recall_Precision
 
@@ -43,9 +44,7 @@ def setup_logging(level, output_file=None):
 def draw_plots(variable_name, history, y_label, number_of_inputs):
 
     # NOTE: Matplotlib needs to be imported after Keras/TensorFlow because of conflicting libraries
-    import matplotlib as mpl
-    mpl.use('Agg')
-    import matplotlib.pyplot as plt
+
 
     plt.clf()
 
@@ -61,9 +60,9 @@ def draw_plots(variable_name, history, y_label, number_of_inputs):
     plt.savefig(path_plot+".pdf", bbox_inches="tight")
 
 def draw_custom_callbacks(metric_data, metric_names, variables, y_labels, number_of_inputs):
-    import matplotlib as mpl
-    mpl.use('Agg')
-    import matplotlib.pyplot as plt
+    # import matplotlib as mpl
+    # mpl.use('Agg')
+    # import matplotlib.pyplot as plt
 
     epochs = range(1, len(metric_data) + 1)
 
@@ -104,9 +103,9 @@ def main(args, config):
     import root_numpy
 
     # NOTE: Matplotlib needs to be imported after Keras/TensorFlow because of conflicting libraries #TODO: Works now for LCG94?
-    import matplotlib as mpl
-    mpl.use('Agg')
-    import matplotlib.pyplot as plt
+    # import matplotlib as mpl
+    # mpl.use('Agg')
+    # import matplotlib.pyplot as plt
 
     from sklearn import preprocessing, model_selection
     import keras_models

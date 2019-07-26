@@ -161,14 +161,17 @@ def significance_loss(y_true, y_pred, event_weights, class_label):
 
     label_mask = K.cast(K.equal(K.argmax(y_pred), class_label), K.floatx())
     label_mask_true = K.cast(K.equal(K.argmax(y_true), class_label), K.floatx())
+    label_mask_false = K.cast(K.not_equal(K.argmax(y_true), class_label), K.floatx())
     event_weights = K.flatten(event_weights)
 
     signals = label_mask*label_mask_true*highest_values*event_weights
-    all_events = label_mask*highest_values*event_weights
+    background = label_mask*label_mask_false*highest_values*event_weights
+    #all_events = label_mask*highest_values*event_weights
 
     signal_sum = K.sum(signals)
+    background_sum = K.sum(background)
 
-    all_sum = K.sum(all_events)
+    all_sum = signal_sum + background_sum
     significance_positive = (signal_sum) / (all_sum + K.epsilon())
 
     significance_negative = - significance_positive
@@ -181,7 +184,7 @@ def significance_curry_loss_single(number_of_labels):
         for i in range(number_of_labels):
             loss = significance_loss(y_true, y_pred, event_weights=weights, class_label=i)
             total_loss += loss
-        return loss_ce(y_true, y_pred, weights) + total_loss
+        return total_loss + 1./8 * loss_ce(y_true, y_pred, weights)
 
     return significance
 
@@ -205,7 +208,7 @@ def ams_curry_loss_single(number_of_labels, br = 1.0):
         for i in range(number_of_labels):
             loss = ams_loss(y_true, y_pred, event_weights=weights, class_label=i, br=br)
             total_loss += loss
-        return total_loss
+        return loss_ce(y_true, y_pred, weights) + 0.1 * total_loss
 
     return ams
 

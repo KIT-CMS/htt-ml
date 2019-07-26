@@ -84,7 +84,7 @@ def calculate_metric_per_cut(key, item, classes, weights, output_path, cuts, met
         if sum_of_all != 0.0:
             all_metrics.append(sum_of_target/sum_of_all)
         else:
-            print('Sum of all is {} for cut {}'.format(sum_of_all,cut))
+            #print('Sum of all is {} for cut {}'.format(sum_of_all,cut))
             all_metrics.append(0)
 
     plt.figure(figsize=(6,6))
@@ -137,7 +137,7 @@ def plot_significance_per_bin(title, dictionary, classes, weights, output_path, 
 
     ax_2.plot(x_values, significance_per_bin, 'ro')
     ax_2.set_xlim([0.,1.0])
-    ax_2.set_ylim([0.,60.])
+    ax_2.set_ylim([0.,100.])
     ax_2.set_ylabel(r'$S/\sqrt{S+B}$')
     fig.tight_layout()
     fig.savefig(output_path + ".png", bbox_inches="tight")
