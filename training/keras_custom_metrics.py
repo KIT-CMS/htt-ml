@@ -152,8 +152,24 @@ def ams_loss(y_true, y_pred, event_weights, class_label, br=0.):
 
     return ams_score_negative
 
+# def loss_ce(y_true, y_pred, w):
+#     w = K.flatten(w)
+#     return categorical_crossentropy(y_true, y_pred)*w
+
 def loss_ce(y_true, y_pred, w):
-    return K.mean(K.mean(categorical_crossentropy(y_true, y_pred), axis=-1) * w)
+    # scale predictions so that the class probas of each sample sum to 1
+    #mask = K.constant([0,0,1,1,1,1,1,1])
+    #tiled_mask = K.tile(mask, (K.shape(y_true)[0],1))
+    # y_true = y_true[:,2:]
+    # y_pred = y_pred[:,2:]
+
+    y_pred /= K.sum(y_pred, axis=-1, keepdims=True)
+    # clip to prevent NaN's and Inf's
+    y_pred = K.clip(y_pred, K.epsilon(), 1 - K.epsilon())
+    # calc
+    loss = y_true * K.log(y_pred) * w
+    loss = -K.sum(loss, -1)
+    return loss
 
 
 def significance_loss(y_true, y_pred, event_weights, class_label):
@@ -178,15 +194,64 @@ def significance_loss(y_true, y_pred, event_weights, class_label):
 
     return significance_negative
 
+def significance_per_bin(y_true, y_pred, event_weights, class_label):
+    w = K.flatten(event_weights)
+    highest_values = K.max(y_pred, axis=-1)
+    label_mask = K.cast(K.equal(K.argmax(y_pred), class_label), K.floatx())
+    label_mask_true = K.cast(K.equal(K.argmax(y_true), class_label), K.floatx())
+    label_mask_false = K.cast(K.not_equal(K.argmax(y_true), class_label), K.floatx())
+    def gauss_filter(x, mean, width):
+        return tf.exp(-1.0 * (x - mean) ** 2 / 2.0 / width ** 2)
+
+    def count_sig(y, mean, width):
+        #times = 100.0
+        f = gauss_filter(y, mean, width) * label_mask * label_mask_true
+        return K.sum(f*w)
+
+    def count_bkg(y, mean, width):
+        f = gauss_filter(y, mean, width) * label_mask * label_mask_false
+        return K.sum(f*w)
+
+    bins = np.linspace(0, 1, 11)
+    width = bins[1] - bins[0]
+    mids = bins[:-1] + 0.5 * width
+    l = 0.0
+    for mean in mids:
+        sig = count_sig(highest_values, mean, width)
+        bkg = count_bkg(highest_values, mean, width)
+        l += sig / K.sqrt(K.clip(sig + bkg, K.epsilon(), None))
+    l /= K.cast(len(mids), K.floatx())
+    return -l
+
 def significance_curry_loss_single(number_of_labels):
     def significance(y_true, y_pred, weights):
         total_loss = 0
-        for i in range(number_of_labels):
-            loss = significance_loss(y_true, y_pred, event_weights=weights, class_label=i)
-            total_loss += loss
-        return total_loss + 1./8 * loss_ce(y_true, y_pred, weights)
+        loss_2 = significance_loss(y_true, y_pred, event_weights=weights, class_label=1)
+        loss_1 = significance_loss(y_true, y_pred, event_weights=weights, class_label=0)
+        # for i in range(number_of_labels):
+        #     if i > 1:
+        #         continue
+        #     loss = significance_loss(y_true, y_pred, event_weights=weights, class_label=i)
+        #     # if i == 1:
+        #     #     loss += 5
+        #     #     loss *= 100
+        #     total_loss += loss
+        return 10*loss_2  + 10*loss_1 #+ loss_ce(y_true, y_pred, weights)
+        #return loss_ce(y_true, y_pred, weights)
 
     return significance
+
+def significance_loss_binned(number_of_labels):
+    def ams(y_true, y_pred, weights):
+        total_loss = 0
+        loss_2 = significance_per_bin(y_true, y_pred, event_weights=weights, class_label=1)
+        loss_1 = significance_per_bin(y_true, y_pred, event_weights=weights, class_label=0)
+        # for i in range(number_of_labels):
+        #     loss = significance_per_bin(y_true, y_pred, event_weights=weights, class_label=i)
+        #     total_loss += loss
+        return loss_1 + loss_2 + 5*loss_ce(y_true, y_pred, weights)
+
+    return ams
 
 def significance_curry_loss(class_label):
     def significance(y_true, y_pred, weights):

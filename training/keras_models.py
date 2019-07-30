@@ -158,15 +158,17 @@ def smhtt_dropout_relu(num_inputs, num_outputs):
             model.add(Dense(nodes, input_dim=num_inputs))
         else:
             model.add(Dense(nodes))
-        model.add(BatchNormalization())
+        #model.add(BatchNormalization())
         model.add(Activation("relu"))
         #model.add(Dropout(0.5))
 
     model.add(Dense(num_outputs))
-    model.add(BatchNormalization())
+    #model.add(BatchNormalization())
     model.add(Activation("softmax"))
 
-    model.compile(loss="categorical_crossentropy", optimizer=Adam(lr=2e-2, decay=0.01))
+    #model.compile(loss="categorical_crossentropy", optimizer=Adam(lr=2e-2, decay=0.01))
+    model.compile(loss="categorical_crossentropy", optimizer=Adam(lr=1e-4))
+
     return model
 
 def smhtt_significance(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
@@ -223,12 +225,12 @@ def smhtt_significance_single_output(num_inputs, num_outputs, output_names, lear
     loss_ce_ = wrapped_partial(loss_ce, w=weights)
     metrics.append(loss_ce_)
     for i, name in enumerate(output_names):
-        variable_loss = wrapped_partial(significance_loss, event_weights=weights, class_label=i)
+        variable_loss = wrapped_partial(significance_per_bin, event_weights=weights, class_label=i)
         metrics.append(variable_loss)
 
-    loss = wrapped_partial(significance_curry_loss_single(number_of_labels=num_outputs), weights=weights)
+    loss = wrapped_partial(significance_loss_binned(number_of_labels=num_outputs), weights=weights)
 
-    model.compile(loss=loss, optimizer=Adam(lr=learning_rate), metrics=metrics)
+    model.compile(loss=loss, optimizer=Adam(lr=1e-4), metrics=metrics)
     return model
 
 def smhtt_ams(num_inputs, num_outputs, output_names, learning_rate = 1e-3):

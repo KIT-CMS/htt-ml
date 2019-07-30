@@ -377,6 +377,7 @@ def main(args, config):
     history = model.fit(
         [x_train, w_train],
         y_train,
+        #sample_weight=w_train,
         validation_data=([x_test, w_test], y_test),
         batch_size=batch_size,
         nb_epoch=config["model"]["epochs"],
