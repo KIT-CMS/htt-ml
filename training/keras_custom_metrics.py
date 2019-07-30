@@ -244,12 +244,12 @@ def significance_curry_loss_single(number_of_labels):
 def significance_loss_binned(number_of_labels):
     def ams(y_true, y_pred, weights):
         total_loss = 0
-        loss_2 = significance_per_bin(y_true, y_pred, event_weights=weights, class_label=1)
-        loss_1 = significance_per_bin(y_true, y_pred, event_weights=weights, class_label=0)
-        # for i in range(number_of_labels):
-        #     loss = significance_per_bin(y_true, y_pred, event_weights=weights, class_label=i)
-        #     total_loss += loss
-        return loss_1 + loss_2 + 5*loss_ce(y_true, y_pred, weights)
+        # loss_2 = significance_per_bin(y_true, y_pred, event_weights=weights, class_label=1)
+        # loss_1 = significance_per_bin(y_true, y_pred, event_weights=weights, class_label=0)
+        for i in range(number_of_labels):
+            loss = significance_per_bin(y_true, y_pred, event_weights=weights, class_label=i)
+            total_loss += loss
+        return total_loss + loss_ce(y_true, y_pred, weights)
 
     return ams
 

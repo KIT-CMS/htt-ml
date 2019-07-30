@@ -384,6 +384,11 @@ def main(args, config):
         shuffle=True,
         callbacks=callbacks)
 
+    path_history = os.path.join(config["output_path"],
+                              "fold{}_keras_history.pickle".format(args.fold))
+
+    pickle.dump([history.history, metrics.get_data()], open(path_history, 'wb'))
+
     # Plot metrics
 
     significance_metric = metrics.get_data()
