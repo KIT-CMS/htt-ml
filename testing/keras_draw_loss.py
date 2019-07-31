@@ -8,6 +8,7 @@ import yaml
 import pickle
 import os
 import re
+import numpy as np
 import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
@@ -43,10 +44,10 @@ def draw_plots(variable_name, history, y_label):
 
     plt.clf()
 
-    epochs = range(1, len(history.history[variable_name]) + 1)
-    plt.plot(epochs, history.history[variable_name], lw=3, label="Train {}".format(variable_name))
+    epochs = range(1, len(history[variable_name]) + 1)
+    plt.plot(epochs, history[variable_name], lw=3, label="Train {}".format(variable_name))
     plt.plot(
-        epochs, history.history["val_{}".format(variable_name)], lw=3, label="Validation {}".format(variable_name))
+        epochs, history["val_{}".format(variable_name)], lw=3, label="Validation {}".format(variable_name))
     plt.xlabel("Epoch"), plt.ylabel(y_label)
     path_plot = os.path.join(config_train["output_path"],
                              "fold{}_{}".format(args.fold, variable_name))
@@ -62,19 +63,19 @@ def draw_validation_losses(variable_names, history, y_label, class_names):
     ax2 = ax1.twinx()
     j=0
     for variable_name in variable_names:
-        epochs = range(1, len(history.history[variable_name]) + 1)
+        epochs = range(1, len(history[variable_name]) + 1)
         if 'significance_per_bin' in variable_name:
             digits = re.findall(r'\d', variable_name)
             if digits:
                 digit = int(digits[0])
                 ax1.plot(
-                    epochs, history.history["{}".format(variable_name)], lw=3, label="Val {}".format(class_names[digit]))
+                    epochs, history["{}".format(variable_name)], lw=3, label="Val {}".format(class_names[digit]))
             else:
                 ax1.plot(
-                    epochs, history.history["{}".format(variable_name)], lw=3, label="Val {}".format(class_names[0]))
+                    epochs, history["{}".format(variable_name)], lw=3, label="Val {}".format(class_names[0]))
         elif 'loss_ce' in variable_name:
             ax2.plot(
-                epochs, history.history["{}".format(variable_name)], lw=3,
+                epochs, np.asarray(history["{}".format(variable_name)])*10., lw=3,
                 label="Val {}".format(variable_name), color='y')
     plt.xlabel("Epoch")
     ax1.set_ylabel('Significance-' + y_label)
@@ -95,20 +96,20 @@ def draw_training_losses(variable_names, history, y_label, class_names):
     ax2 = ax1.twinx()
     j=0
     for variable_name in variable_names:
-        print(variable_name)
-        epochs = range(1, len(history.history[variable_name]) + 1)
+        epochs = range(1, len(history[variable_name]) + 1)
         if 'significance_per_bin' in variable_name:
             digits = re.findall(r'\d', variable_name)
             if digits:
                 digit = int(digits[0])
                 ax1.plot(
-                    epochs, history.history["{}".format(variable_name)], lw=3, label="Train {}".format(class_names[digit]))
+                    epochs, history["{}".format(variable_name)], lw=3, label="Train {}".format(class_names[digit]))
             else:
                 ax1.plot(
-                    epochs, history.history["{}".format(variable_name)], lw=3, label="Train {}".format(class_names[0]))
+                    epochs, history["{}".format(variable_name)], lw=3, label="Train {}".format(class_names[0]))
         elif 'loss_ce' in variable_name:
+            #print(history["{}".format(variable_name)])
             ax2.plot(
-                epochs, history.history["{}".format(variable_name)], lw=3,
+                epochs, np.asarray(history["{}".format(variable_name)])*10., lw=3,
                 label="Train {}".format(variable_name), color='y')
     plt.xlabel("Epoch")
     ax1.set_ylabel('Significance-' + y_label)
@@ -166,6 +167,9 @@ def main(args, config_train):
             variable_names_val.append(variable_name)
         else:
             variable_names_train.append(variable_name)
+
+    variable_names_train = sorted(variable_names_train)
+    variable_names_val = sorted(variable_names_val)
 
     draw_validation_losses(variable_names_val,history_dict, y_label='Loss', class_names = classes)
     draw_training_losses(variable_names_train, history_dict, y_label='Loss', class_names = classes)

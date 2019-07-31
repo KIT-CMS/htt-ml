@@ -230,7 +230,8 @@ def smhtt_significance_single_output(num_inputs, num_outputs, output_names, lear
 
     loss = wrapped_partial(significance_loss_binned(number_of_labels=num_outputs), weights=weights)
 
-    model.compile(loss=loss, optimizer=Adam(lr=1e-4), metrics=metrics)
+    #model.compile(loss=loss, optimizer=Adam(lr=1e-4), metrics=metrics)
+    model.compile(loss=loss, optimizer=SGD(lr=1e-4, momentum=0.9,decay=0.0,nesterov=False), metrics=metrics)
     return model
 
 def smhtt_ams(num_inputs, num_outputs, output_names, learning_rate = 1e-3):

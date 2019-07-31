@@ -391,25 +391,25 @@ def main(args, config):
 
     # Plot metrics
 
-    significance_metric = metrics.get_data()
-
-    variable_names_train = []
-    variable_names_val = []
-    for variable_name in history.history.keys():
-        # if 'loss_ce' in variable_name:
-        #     continue
-        if 'val' in variable_name:
-            variable_names_val.append(variable_name)
-        else:
-            variable_names_train.append(variable_name)
-
-    #print(variable_names_train)
-    draw_validation_losses(variable_names_val,history, y_label='Loss', number_of_inputs=len(variables), class_names = classes)
-    draw_training_losses(variable_names_train, history, y_label='Loss', number_of_inputs=len(variables), class_names = classes)
-
-    draw_plots(variable_name="loss", history=history, y_label="Loss", number_of_inputs=len(variables))
-    draw_significance_per_class(metric_data=significance_metric, metric_names=['Significance'], classes=classes, y_labels='Loss')
-
+    # significance_metric = metrics.get_data()
+    #
+    # variable_names_train = []
+    # variable_names_val = []
+    # for variable_name in history.history.keys():
+    #     # if 'loss_ce' in variable_name:
+    #     #     continue
+    #     if 'val' in variable_name:
+    #         variable_names_val.append(variable_name)
+    #     else:
+    #         variable_names_train.append(variable_name)
+    #
+    # #print(variable_names_train)
+    # draw_validation_losses(variable_names_val,history, y_label='Loss', number_of_inputs=len(variables), class_names = classes)
+    # draw_training_losses(variable_names_train, history, y_label='Loss', number_of_inputs=len(variables), class_names = classes)
+    #
+    # draw_plots(variable_name="loss", history=history, y_label="Loss", number_of_inputs=len(variables))
+    # draw_significance_per_class(metric_data=significance_metric, metric_names=['Significance'], classes=classes, y_labels='Loss')
+    #
 
     if not "save_best_only" in config["model"]:
         logger.info("Write model to %s.", path_model)
