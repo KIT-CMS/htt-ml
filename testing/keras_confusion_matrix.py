@@ -128,7 +128,7 @@ def main(args, config_test, config_train):
         dtype=np.float)
     class_weights = config_train["class_weights"]
     for i_class, class_ in enumerate(config_train["classes"]):
-        logger.debug("Process class %s.", class_)
+        logger.debug("Process class %s. with weight %s", class_,class_weights[class_])
 
         tree = file_.Get(class_)
         if tree == None:
@@ -207,5 +207,5 @@ if __name__ == "__main__":
     config_test = parse_config(args.config_testing)
     print(config_test)
     config_train = parse_config(args.config_training)
-    print(config_train)
+    print({key: value for key,value in config_train.items() if key !="processes"})
     main(args, config_test, config_train)
