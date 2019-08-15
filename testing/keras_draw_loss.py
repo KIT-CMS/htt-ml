@@ -64,7 +64,7 @@ def draw_validation_losses(variable_names, history, y_label, class_names):
     j=0
     for variable_name in variable_names:
         epochs = range(1, len(history[variable_name]) + 1)
-        if 'significance_per_bin' in variable_name:
+        if 'significance' in variable_name:
             digits = re.findall(r'\d', variable_name)
             if digits:
                 digit = int(digits[0])
@@ -75,7 +75,7 @@ def draw_validation_losses(variable_names, history, y_label, class_names):
                     epochs, history["{}".format(variable_name)], lw=3, label="Val {}".format(class_names[0]))
         elif 'loss_ce' in variable_name:
             ax2.plot(
-                epochs, np.asarray(history["{}".format(variable_name)])*10., lw=3,
+                epochs, np.asarray(history["{}".format(variable_name)]), lw=3,
                 label="Val {}".format(variable_name), color='y')
     plt.xlabel("Epoch")
     ax1.set_ylabel('Significance-' + y_label)
@@ -97,7 +97,7 @@ def draw_training_losses(variable_names, history, y_label, class_names):
     j=0
     for variable_name in variable_names:
         epochs = range(1, len(history[variable_name]) + 1)
-        if 'significance_per_bin' in variable_name:
+        if 'significance' in variable_name:
             digits = re.findall(r'\d', variable_name)
             if digits:
                 digit = int(digits[0])
@@ -109,7 +109,7 @@ def draw_training_losses(variable_names, history, y_label, class_names):
         elif 'loss_ce' in variable_name:
             #print(history["{}".format(variable_name)])
             ax2.plot(
-                epochs, np.asarray(history["{}".format(variable_name)])*10., lw=3,
+                epochs, np.asarray(history["{}".format(variable_name)]), lw=3,
                 label="Train {}".format(variable_name), color='y')
     plt.xlabel("Epoch")
     ax1.set_ylabel('Significance-' + y_label)

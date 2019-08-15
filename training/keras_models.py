@@ -28,150 +28,24 @@ def example(num_inputs, num_outputs):
         ])
     return model
 
-
-
-def smhtt_simple(num_inputs, num_outputs):
-    model = Sequential()
-    model.add(
-        Dense(
-            100, init="glorot_normal", activation="tanh",
-            input_dim=num_inputs))
-    model.add(Dense(num_outputs, init="glorot_normal", activation="softmax"))
-    model.compile(loss="mean_squared_error", optimizer=Nadam(), metrics=[])
-    return model
-
-
-def smhtt_mt(num_inputs, num_outputs):
-    model = Sequential()
-    model.add(
-        Dense(
-            300,
-            init="glorot_normal",
-            activation="tanh",
-            W_regularizer=l2(1e-4),
-            input_dim=num_inputs))
-    model.add(
-        Dense(
-            300,
-            init="glorot_normal",
-            activation="tanh",
-            W_regularizer=l2(1e-4)))
-    model.add(
-        Dense(
-            300,
-            init="glorot_normal",
-            activation="tanh",
-            W_regularizer=l2(1e-4)))
-    model.add(Dense(num_outputs, init="glorot_normal", activation="softmax"))
-    model.compile(loss="mean_squared_error", optimizer=Nadam(), metrics=[])
-    return model
-
-
-def smhtt_et(num_inputs, num_outputs):
-    model = Sequential()
-    model.add(
-        Dense(
-            1000,
-            init="glorot_normal",
-            activation="tanh",
-            W_regularizer=l2(1e-4),
-            input_dim=num_inputs))
-    model.add(Dense(num_outputs, init="glorot_normal", activation="softmax"))
-    model.compile(loss="mean_squared_error", optimizer=Nadam(), metrics=[])
-    return model
-
-
-def smhtt_tt(num_inputs, num_outputs):
-    model = Sequential()
-    model.add(
-        Dense(
-            200,
-            init="glorot_normal",
-            activation="tanh",
-            W_regularizer=l2(1e-4),
-            input_dim=num_inputs))
-    model.add(
-        Dense(
-            200,
-            init="glorot_normal",
-            activation="tanh",
-            W_regularizer=l2(1e-4)))
-    model.add(
-        Dense(
-            200,
-            init="glorot_normal",
-            activation="tanh",
-            W_regularizer=l2(1e-4)))
-    model.add(Dense(num_outputs, init="glorot_normal", activation="softmax"))
-    model.compile(loss="mean_squared_error", optimizer=Nadam(), metrics=[])
-    return model
-
-
-def smhtt_legacy(num_inputs, num_outputs):
-    model = Sequential()
-    model.add(
-        Dense(
-            300,
-            init="glorot_normal",
-            activation="relu",
-            W_regularizer=l2(1e-4),
-            input_dim=num_inputs))
-    model.add(
-        Dense(
-            300,
-            init="glorot_normal",
-            activation="relu",
-            W_regularizer=l2(1e-4)))
-    model.add(
-        Dense(
-            300,
-            init="glorot_normal",
-            activation="relu",
-            W_regularizer=l2(1e-4)))
-    model.add(Dense(num_outputs, init="glorot_normal", activation="softmax"))
-    model.compile(loss="mean_squared_error", optimizer=Adam(), metrics=[])
-    return model
-
-
-def smhtt_dropout(num_inputs, num_outputs):
-    model = Sequential()
-
-    for i, nodes in enumerate([200] * 2):
-        if i == 0:
-            model.add(Dense(nodes, input_dim=num_inputs))
-        else:
-            model.add(Dense(nodes))
-        model.add(Activation("relu"))
-        model.add(Dropout(0.5))
-
-    model.add(Dense(num_outputs))
-    model.add(Activation("softmax"))
-
-    model.compile(loss="mean_squared_error", optimizer=Nadam())
-    return model
-
 def smhtt_dropout_relu(num_inputs, num_outputs):
     model = Sequential()
 
     for i, nodes in enumerate([200] * 2):
         if i == 0:
-            model.add(Dense(nodes, input_dim=num_inputs))
+            model.add(Dense(nodes, kernel_regularizer=l2(1e-5), input_dim=num_inputs))
         else:
-            model.add(Dense(nodes))
-        #model.add(BatchNormalization())
+            model.add(Dense(nodes, kernel_regularizer=l2(1e-5)))
         model.add(Activation("relu"))
-        #model.add(Dropout(0.5))
+        model.add(Dropout(0.3))
 
-    model.add(Dense(num_outputs))
-    #model.add(BatchNormalization())
+    model.add(Dense(num_outputs, kernel_regularizer=l2(1e-5)))
     model.add(Activation("softmax"))
 
-    #model.compile(loss="categorical_crossentropy", optimizer=Adam(lr=2e-2, decay=0.01))
-    model.compile(loss="categorical_crossentropy", optimizer=Adam(lr=1e-4))
-
+    model.compile(loss="categorical_crossentropy", optimizer=Adam(lr=1e-4), weighted_metrics=["mean_squared_error"], metrics=['accuracy'])
     return model
 
-def smhtt_significance(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
+def smhtt_significance_multi_output(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
     inputs = Input(shape=(num_inputs,))
     weights = Input(shape=(1,))
 
@@ -198,43 +72,75 @@ def smhtt_significance(num_inputs, num_outputs, output_names, learning_rate = 1e
 
     loss_dict = dict()
     for i, name in enumerate(output_names):
-        loss_dict[name] = wrapped_partial(significance_curry_loss(class_label=i), weights=weights)
+        loss_dict[name] = wrapped_partial(significance_loss_multi_output(class_label=i), weights=weights)
 
     model.compile(loss=loss_dict, optimizer=Adam(lr=learning_rate), loss_weights=None)
     return model
 
-def smhtt_significance_single_output(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
+def smhtt_significance_unbinned(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
     inputs = Input(shape=(num_inputs,))
     weights = Input(shape=(1,))
 
-    layer_1 = Dense(200, activation=None, kernel_regularizer=None)(inputs)
+    layer_1 = Dense(200, activation=None, kernel_regularizer=l2(1e-5))(inputs)
     #layer_1 = BatchNormalization()(layer_1)
     layer_1 = Activation('relu')(layer_1)
     #layer_1 = Dropout(rate=0.3)(layer_1)
-    layer_2 = Dense(200, activation=None, kernel_regularizer=None)(layer_1)
+    layer_2 = Dense(200, activation=None, kernel_regularizer=l2(1e-5))(layer_1)
     #layer_2 = BatchNormalization()(layer_2)
     layer_2 = Activation('relu')(layer_2)
     #layer_2 = Dropout(rate=0.3)(layer_2)
-    output_0 = Dense(num_outputs, activation=None, kernel_regularizer=None, name="dense_out")(layer_2)
+    output_0 = Dense(num_outputs, activation=None, kernel_regularizer=l2(1e-5), name="dense_out")(layer_2)
     #output_0 = BatchNormalization(name='batchnorm_out')(output_0)
     output_0 = Activation('softmax', name='out')(output_0)
 
     model = Model(inputs=[inputs, weights], outputs=output_0)
 
     metrics = []
-    loss_ce_ = wrapped_partial(loss_ce, w=weights)
+    loss_ce_ = wrapped_partial(loss_ce, weights=weights)
     metrics.append(loss_ce_)
     for i, name in enumerate(output_names):
-        variable_loss = wrapped_partial(significance_per_bin, event_weights=weights, class_label=i)
+        variable_loss = wrapped_partial(significance_unbinned_class, event_weights=weights, class_label=i)
+        metrics.append(variable_loss)
+
+    #loss = wrapped_partial(significance_loss_unbinned(number_of_labels=num_outputs), weights=weights)
+    loss = wrapped_partial(loss_ce, weights=weights)
+
+    model.compile(loss=loss, optimizer=Adam(lr=1e-4), metrics=metrics)
+
+    return model
+
+def smhtt_significance_binned(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
+    inputs = Input(shape=(num_inputs,))
+    weights = Input(shape=(1,))
+
+    layer_1 = Dense(200, activation=None, kernel_regularizer=l2(1e-5))(inputs)
+    #layer_1 = BatchNormalization()(layer_1)
+    layer_1 = Activation('relu')(layer_1)
+    #layer_1 = Dropout(rate=0.3)(layer_1)
+    layer_2 = Dense(200, activation=None, kernel_regularizer=l2(1e-5))(layer_1)
+    #layer_2 = BatchNormalization()(layer_2)
+    layer_2 = Activation('relu')(layer_2)
+    #layer_2 = Dropout(rate=0.3)(layer_2)
+    output_0 = Dense(num_outputs, activation=None, kernel_regularizer=l2(1e-5), name="dense_out")(layer_2)
+    #output_0 = BatchNormalization(name='batchnorm_out')(output_0)
+    output_0 = Activation('softmax', name='out')(output_0)
+
+    model = Model(inputs=[inputs, weights], outputs=output_0)
+
+    metrics = []
+    loss_ce_ = wrapped_partial(loss_ce, weights=weights)
+    metrics.append(loss_ce_)
+    for i, name in enumerate(output_names):
+        variable_loss = wrapped_partial(significance_loss_binned, event_weights=weights, class_label=i)
         metrics.append(variable_loss)
 
     loss = wrapped_partial(significance_loss_binned(number_of_labels=num_outputs), weights=weights)
 
-    #model.compile(loss=loss, optimizer=Adam(lr=1e-4), metrics=metrics)
-    model.compile(loss=loss, optimizer=SGD(lr=1e-4, momentum=0.9,decay=0.0,nesterov=False), metrics=metrics)
+    model.compile(loss=loss, optimizer=Adam(lr=1e-4), metrics=metrics)
+
     return model
 
-def smhtt_ams(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
+def smhtt_ams_multi_output(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
     inputs = Input(shape=(num_inputs,))
     weights = Input(shape=(1,))
 
@@ -261,7 +167,7 @@ def smhtt_ams(num_inputs, num_outputs, output_names, learning_rate = 1e-3):
 
     loss_dict = dict()
     for i, name in enumerate(output_names):
-        loss_dict[name] = wrapped_partial(ams_curry_loss(class_label=i), weights=weights)
+        loss_dict[name] = wrapped_partial(ams_loss_multi_output(class_label=i), weights=weights)
 
     model.compile(loss=loss_dict, optimizer=Adam(lr=learning_rate), loss_weights=None)
     return model
@@ -288,10 +194,10 @@ def smhtt_ams_single_output(num_inputs, num_outputs, output_names, learning_rate
     loss_ce_ = wrapped_partial(loss_ce, w=weights)
     metrics.append(loss_ce_)
     for i, name in enumerate(output_names):
-        variable_loss = wrapped_partial(ams_loss, event_weights=weights, class_label=i, br=1.0)
+        variable_loss = wrapped_partial(ams_loss_class, event_weights=weights, class_label=i, br=1.0)
         metrics.append(variable_loss)
 
-    loss = wrapped_partial(ams_curry_loss_single(number_of_labels=num_outputs), weights=weights)
+    loss = wrapped_partial(ams_loss_single_output(number_of_labels=num_outputs), weights=weights)
 
     model.compile(loss=loss, optimizer=Adam(lr=learning_rate), metrics=metrics)
     return model

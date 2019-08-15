@@ -1,35 +1,8 @@
-from sklearn.metrics import recall_score, precision_score, f1_score
-from keras import backend as K
 from keras.callbacks import Callback
 from keras.losses import categorical_crossentropy
+import keras.backend as K
 import tensorflow as tf
 import numpy as np
-
-class Recall_Precision(Callback):
-    def on_train_begin(self, logs={}):
-        self._data = []
-
-    def on_epoch_end(self, batch, logs={}):
-        X_val, y_val, sample_weights = self.validation_data[0], self.validation_data[1], self.validation_data[2]
-        y_predict = np.asarray(self.model.predict(X_val))
-
-        y_val = np.argmax(y_val, axis=1)
-        y_predict = np.argmax(y_predict, axis=1)
-
-        recall = recall_score(y_val, y_predict, average=None, sample_weight=sample_weights)
-        precision = precision_score(y_val, y_predict, average=None, sample_weight=sample_weights)
-        f1 = f1_score(y_val, y_predict, average=None, sample_weight=sample_weights)
-        print("F1 score: {} - Recall: {} - Precision: {}".format(f1, recall, precision))
-
-        self._data.append({
-            'F1-Score': f1,
-            'Recall': recall,
-            'Precision': precision
-        })
-        return
-
-    def get_data(self):
-        return self._data
 
 def calculate_significance_per_class(y_true, y_pred, event_weights, number_of_labels):
     class_dictionary = {}
@@ -130,7 +103,7 @@ class significance(Callback):
         return self._data
 
 
-def ams_loss(y_true, y_pred, event_weights, class_label, br=0.):
+def ams_loss_class(y_true, y_pred, event_weights, class_label, br=0.):
     highest_values = K.max(y_pred, axis=-1)
 
     label_0_mask = K.cast(K.equal(K.argmax(y_pred), class_label), K.floatx())
@@ -152,36 +125,34 @@ def ams_loss(y_true, y_pred, event_weights, class_label, br=0.):
 
     return ams_score_negative
 
-# def loss_ce(y_true, y_pred, w):
-#     w = K.flatten(w)
-#     return categorical_crossentropy(y_true, y_pred)*w
+def bugged_loss_ce(y_true, y_pred, weights):
+    return K.mean(K.mean(categorical_crossentropy(y_true, y_pred), axis=-1) * weights)
 
-def loss_ce(y_true, y_pred, w):
-    # scale predictions so that the class probas of each sample sum to 1
-    #mask = K.constant([0,0,1,1,1,1,1,1])
-    #tiled_mask = K.tile(mask, (K.shape(y_true)[0],1))
-    # y_true = y_true[:,2:]
-    # y_pred = y_pred[:,2:]
-
-    y_pred /= K.sum(y_pred, axis=-1, keepdims=True)
-    # clip to prevent NaN's and Inf's
-    y_pred = K.clip(y_pred, K.epsilon(), 1 - K.epsilon())
-    # calc
-    loss = y_true * K.log(y_pred) * w
-    loss = -K.sum(loss, -1)
+def loss_ce(y_true, y_pred, weights):
+    score_array = categorical_crossentropy(y_true, y_pred)
+    # reduce score_array to same ndim as weight array
+    weights = K.flatten(weights)
+    ndim = K.ndim(score_array)
+    weight_ndim = K.ndim(weights)
+    score_array = K.mean(score_array,
+                         axis=list(range(weight_ndim, ndim)))
+    score_array *= weights
+    score_array /= K.mean(K.cast(K.not_equal(weights, 0), K.floatx()))
+    loss = K.mean(score_array)
     return loss
 
 
-def significance_loss(y_true, y_pred, event_weights, class_label):
+def significance_unbinned_class(y_true, y_pred, event_weights, class_label):
     highest_values = K.max(y_pred, axis=-1)
+    #class_values = K.flatten(y_pred[:,class_label])
 
     label_mask = K.cast(K.equal(K.argmax(y_pred), class_label), K.floatx())
     label_mask_true = K.cast(K.equal(K.argmax(y_true), class_label), K.floatx())
     label_mask_false = K.cast(K.not_equal(K.argmax(y_true), class_label), K.floatx())
     event_weights = K.flatten(event_weights)
 
-    signals = label_mask*label_mask_true*highest_values*event_weights
-    background = label_mask*label_mask_false*highest_values*event_weights
+    signals = label_mask_true*highest_values*label_mask#*event_weights
+    background = label_mask_false*highest_values*label_mask#*event_weights
     #all_events = label_mask*highest_values*event_weights
 
     signal_sum = K.sum(signals)
@@ -194,7 +165,7 @@ def significance_loss(y_true, y_pred, event_weights, class_label):
 
     return significance_negative
 
-def significance_per_bin(y_true, y_pred, event_weights, class_label):
+def significance_binned_class(y_true, y_pred, event_weights, class_label):
     w = K.flatten(event_weights)
     highest_values = K.max(y_pred, axis=-1)
     label_mask = K.cast(K.equal(K.argmax(y_pred), class_label), K.floatx())
@@ -212,7 +183,7 @@ def significance_per_bin(y_true, y_pred, event_weights, class_label):
         f = gauss_filter(y, mean, width) * label_mask * label_mask_false
         return K.sum(f*w)
 
-    bins = np.linspace(0, 1, 11)
+    bins = np.linspace(0.2, 1.0, 11)
     width = bins[1] - bins[0]
     mids = bins[:-1] + 0.5 * width
     l = 0.0
@@ -223,55 +194,45 @@ def significance_per_bin(y_true, y_pred, event_weights, class_label):
     l /= K.cast(len(mids), K.floatx())
     return -l
 
-def significance_curry_loss_single(number_of_labels):
+def significance_loss_unbinned(number_of_labels):
     def significance(y_true, y_pred, weights):
         total_loss = 0
-        loss_2 = significance_loss(y_true, y_pred, event_weights=weights, class_label=1)
-        loss_1 = significance_loss(y_true, y_pred, event_weights=weights, class_label=0)
-        # for i in range(number_of_labels):
-        #     if i > 1:
-        #         continue
-        #     loss = significance_loss(y_true, y_pred, event_weights=weights, class_label=i)
-        #     # if i == 1:
-        #     #     loss += 5
-        #     #     loss *= 100
-        #     total_loss += loss
-        return 10*loss_2  + 10*loss_1 #+ loss_ce(y_true, y_pred, weights)
-        #return loss_ce(y_true, y_pred, weights)
+        for i in range(number_of_labels):
+            loss = significance_unbinned_class(y_true, y_pred, event_weights=weights, class_label=i)
+            total_loss += loss
+        return total_loss + loss_ce(y_true, y_pred, weights)
 
     return significance
 
 def significance_loss_binned(number_of_labels):
     def ams(y_true, y_pred, weights):
         total_loss = 0
-        # loss_2 = significance_per_bin(y_true, y_pred, event_weights=weights, class_label=1)
-        # loss_1 = significance_per_bin(y_true, y_pred, event_weights=weights, class_label=0)
         for i in range(number_of_labels):
-            loss = significance_per_bin(y_true, y_pred, event_weights=weights, class_label=i)
+            loss = significance_binned_class(y_true, y_pred, event_weights=weights, class_label=i)
             total_loss += loss
-        return total_loss + loss_ce(y_true, y_pred, weights)
+        return total_loss #+ loss_ce(y_true, y_pred, weights)
 
     return ams
 
-def significance_curry_loss(class_label):
+def significance_loss_multi_output(class_label):
     def significance(y_true, y_pred, weights):
-        class_loss = significance_loss(y_true, y_pred, event_weights=weights, class_label=class_label)
+        class_loss = significance_unbinned_class(y_true, y_pred, event_weights=weights, class_label=class_label)
         return class_loss
 
     return significance
 
-def ams_curry_loss(class_label, br = 1.0):
+def ams_loss_multi_output(class_label, br = 1.0):
     def ams(y_true, y_pred, weights):
-        class_loss = ams_loss(y_true, y_pred, event_weights=weights, class_label=class_label, br = br)
+        class_loss = ams_loss_class(y_true, y_pred, event_weights=weights, class_label=class_label, br = br)
         return class_loss
 
     return ams
 
-def ams_curry_loss_single(number_of_labels, br = 1.0):
+def ams_loss_single_output(number_of_labels, br = 1.0):
     def ams(y_true, y_pred, weights):
         total_loss = 0
         for i in range(number_of_labels):
-            loss = ams_loss(y_true, y_pred, event_weights=weights, class_label=i, br=br)
+            loss = ams_loss_class(y_true, y_pred, event_weights=weights, class_label=i, br=br)
             total_loss += loss
         return loss_ce(y_true, y_pred, weights) + 0.1 * total_loss
 
@@ -283,79 +244,3 @@ def focal_loss(gamma=2., alpha=.25):
         pt_0 = tf.where(tf.equal(y_true, 0), y_pred, tf.zeros_like(y_pred))
         return -K.sum(alpha * K.pow(1. - pt_1, gamma) * K.log(pt_1))-K.sum((1-alpha) * K.pow( pt_0, gamma) * K.log(1. - pt_0))
     return focal_loss_fixed
-
-def ggh_precision(y_true, y_pred):
-    y_pred = K.clip(y_pred, 0, 1)
-
-    # get a tensor that is 1 when class is ggh and 0 if not.
-    true_indece = K.argmax(y_true)
-    ggh_indice = K.cast(K.equal(true_indece, 0), K.floatx())
-
-    # Multiply this tensor with the prediction to only get predictions of ggh.
-    tp = K.sum(K.cast(K.equal(K.argmax(y_true, axis=-1),K.argmax(y_pred, axis=-1)),K.floatx())*ggh_indice)
-    all_positive_predictions = K.sum(K.cast(K.equal(K.argmax(y_pred),0), K.floatx())) + K.epsilon()
-
-    precision = tp / all_positive_predictions
-    return precision
-
-def ggh_recall(y_true, y_pred):
-    y_pred = K.clip(y_pred, 0, 1)
-
-    # get a tensor that is 1 when class is ggh and 0 if not.
-    true_indece = K.argmax(y_true)
-    ggh_indice = K.cast(K.equal(true_indece, 0), K.floatx())
-
-    tp = K.sum(K.cast(K.equal(K.argmax(y_true, axis=-1),K.argmax(y_pred, axis=-1)),K.floatx())*ggh_indice)
-    all_possible_positives = K.sum(ggh_indice) + K.epsilon()
-
-    recall = tp / all_possible_positives
-    return recall
-
-def qqh_precision(y_true, y_pred):
-    y_pred = K.clip(y_pred, 0, 1)
-
-    # get a tensor that is 1 when class is qqh and 0 if not.
-    true_indece = K.argmax(y_true)
-    qqh_indice = K.cast(K.equal(true_indece, 1), K.floatx())
-
-    # Multiply this tensor with the prediction to only get predictions of qqh.
-    tp = K.sum(K.cast(K.equal(K.argmax(y_true, axis=-1),K.argmax(y_pred, axis=-1)),K.floatx())*qqh_indice)
-    all_positive_predictions = K.sum(K.cast(K.equal(K.argmax(y_pred),1), K.floatx())) + K.epsilon()
-
-    precision = tp / all_positive_predictions
-
-    #precision = K.print_tensor(precision, message='Precision before masking: ')
-
-    return precision
-
-def qqh_recall(y_true, y_pred):
-    y_pred = K.clip(y_pred, 0, 1)
-
-    # get a tensor that is 1 when class is qqh and 0 if not.
-    true_indece = K.argmax(y_true)
-    qqh_indice = K.cast(K.equal(true_indece, 1), K.floatx())
-
-    tp = K.sum(K.cast(K.equal(K.argmax(y_true, axis=-1),K.argmax(y_pred, axis=-1)),K.floatx())*qqh_indice)
-    all_possible_positives = K.sum(qqh_indice) + K.epsilon()
-
-    recall = tp / all_possible_positives
-    return recall
-
-
-def ggh_fbeta(y_true, y_pred):
-    beta = 1
-
-    precision = ggh_precision(y_true, y_pred)
-    recall = ggh_recall(y_true, y_pred)
-
-    beta_squared = beta ** 2
-    return (beta_squared + 1) * (precision * recall) / (beta_squared * precision + recall + K.epsilon())
-
-def qqh_fbeta(y_true, y_pred):
-    beta = 1
-
-    precision = qqh_precision(y_true, y_pred)
-    recall = qqh_recall(y_true, y_pred)
-
-    beta_squared = beta ** 2
-    return (beta_squared + 1) * (precision * recall) / (beta_squared * precision + recall + K.epsilon())

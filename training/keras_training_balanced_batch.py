@@ -105,8 +105,10 @@ def main(args, config):
         w_class = np.zeros((tree.GetEntries(), 1))
         w_conv = root_numpy.tree2array(
             tree, branches=[config["event_weights"]])
+        # w_class[:,
+        #         0] = w_conv[config["event_weights"]] * config["class_weights"][class_]
         w_class[:,
-                0] = w_conv[config["event_weights"]] * config["class_weights"][class_]
+                0] = config["class_weights"][class_]
         w.append(w_class)
 
         # Get targets for this class
@@ -223,15 +225,47 @@ def main(args, config):
     model_impl = getattr(keras_models, config["model"]["name"])
     model = model_impl(len(variables), len(classes), classes, learning_rate)
     model.summary()
-    history = model.fit(
-        [x_train, w_train],
-        y_train,
-        #sample_weight=w_train,
+
+    # %%
+    ### this a dict containing list of indices from the training y_train,x_train beloning to the resprective class
+    classIndexDict = {label: np.where(y_train[:, i_class] == 1)[0] for i_class, label in enumerate(classes)}
+
+    # %%
+    ### generates a dataset with the same number of events for each class
+    def balancedBatchGenerator(batch_size):
+        while True:
+            nperClass = int(batch_size / len(classes))
+            selIdxDict = {label: classIndexDict[label][np.random.randint(0, len(classIndexDict[label]), nperClass)] for
+                          label in classes}
+            y_collect = np.concatenate([y_train[selIdxDict[label]] for label in classes])
+            x_collect = np.concatenate([x_train[selIdxDict[label], :] for label in classes])
+            w_collect = np.concatenate(
+                [w_train[selIdxDict[label]] * 1 / np.sum(w_train[selIdxDict[label]]) for label in classes])
+            yield [x_collect, w_collect], y_collect
+
+    #exy, exx, exw = next(balancedBatchGenerator(100))
+
+    # history = model.fit(
+    #     [x_train, w_train],
+    #     y_train,
+    #     #sample_weight=w_train,
+    #     validation_data=([x_test, w_test], y_test),
+    #     batch_size=batch_size,
+    #     nb_epoch=config["model"]["epochs"],
+    #     shuffle=True,
+    #     callbacks=callbacks)
+
+    history = model.fit_generator(
+        balancedBatchGenerator(batch_size=batch_size),
+        steps_per_epoch=len(x_train) // batch_size,
+        epochs=config["model"]["epochs"],
+        callbacks=callbacks,
         validation_data=([x_test, w_test], y_test),
-        batch_size=batch_size,
-        nb_epoch=config["model"]["epochs"],
+        max_queue_size=10,
+        workers=5,
         shuffle=True,
-        callbacks=callbacks)
+        use_multiprocessing=True
+    )
 
     path_history = os.path.join(config["output_path"],
                               "fold{}_keras_history.pickle".format(args.fold))

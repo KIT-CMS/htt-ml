@@ -137,7 +137,12 @@ def plot_significance_per_bin(title, dictionary, classes, weights, output_path, 
 
     ax_2.plot(x_values, significance_per_bin, 'ro')
     ax_2.set_xlim([0.,1.0])
-    ax_2.set_ylim([0.,100.])
+    if title == 'ggh':
+        ax_2.set_ylim([0.,50.])
+    elif title == 'qqh':
+        ax_2.set_ylim([0., 80.])
+    else:
+        ax_2.set_ylim([0., 100.])
     ax_2.set_ylabel(r'$S/\sqrt{S+B}$')
     fig.tight_layout()
     fig.savefig(output_path + ".png", bbox_inches="tight")
@@ -184,7 +189,12 @@ def plot_significance_per_cut(title, dictionary, classes, weights, output_path, 
 
     ax_2.plot(bins, significance_per_cut, 'ro')
     ax_2.set_xlim([0.,1.0])
-    ax_2.set_ylim([0., 110.])
+    if title == 'ggh':
+        ax_2.set_ylim([0., 110.])
+    elif title == 'ss' or 'misc':
+        ax_2.set_ylim([0., 100.])
+    else:
+        ax_2.set_ylim([0., 150.])
     ax_2.set_ylabel(r'$S/\sqrt{S+B}$')
     ax_2.set_xlabel(r'Cut')
     fig.tight_layout()
