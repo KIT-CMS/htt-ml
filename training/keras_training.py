@@ -209,7 +209,7 @@ def main(args, config):
                 w_collect=np.concatenate([w_train[selIdxDict[label]]*1/np.sum(w_train[selIdxDict[label]]) for label in classes])
                 yield x_collect, y_collect,w_collect
         history=model.fit_generator(
-            balancedBatchGenerator(batch_size=100),
+            balancedBatchGenerator(batch_size=batch_size),
             steps_per_epoch=10,
             epochs=config["model"]["epochs"],
             callbacks=callbacks,
