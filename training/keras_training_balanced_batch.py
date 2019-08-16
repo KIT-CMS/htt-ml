@@ -105,10 +105,10 @@ def main(args, config):
         w_class = np.zeros((tree.GetEntries(), 1))
         w_conv = root_numpy.tree2array(
             tree, branches=[config["event_weights"]])
-        # w_class[:,
-        #         0] = w_conv[config["event_weights"]] * config["class_weights"][class_]
         w_class[:,
-                0] = config["class_weights"][class_]
+                0] = w_conv[config["event_weights"]] #* config["class_weights"][class_]
+        # w_class[:,
+        #         0] = config["class_weights"][class_]
         w.append(w_class)
 
         # Get targets for this class
@@ -197,7 +197,7 @@ def main(args, config):
             ReduceLROnPlateau(
                 patience=config["model"]["reduce_lr_on_plateau"], verbose=1))
     metrics = significance(x_train=x_train, y_train=y_train, w_train=w_train)
-    callbacks.append(metrics)
+    #callbacks.append(metrics)
 
     # Train model
     if not hasattr(keras_models, config["model"]["name"]):
@@ -223,7 +223,8 @@ def main(args, config):
     #     y_test_list.append(y_test)
 
     model_impl = getattr(keras_models, config["model"]["name"])
-    model = model_impl(len(variables), len(classes), classes, learning_rate)
+    #model = model_impl(len(variables), len(classes), classes, learning_rate)
+    model = model_impl(len(variables), len(classes))
     model.summary()
 
     # %%
@@ -239,11 +240,17 @@ def main(args, config):
                           label in classes}
             y_collect = np.concatenate([y_train[selIdxDict[label]] for label in classes])
             x_collect = np.concatenate([x_train[selIdxDict[label], :] for label in classes])
-            w_collect = np.concatenate(
-                [w_train[selIdxDict[label]] * 1 / np.sum(w_train[selIdxDict[label]]) for label in classes])
-            yield [x_collect, w_collect], y_collect
+            sum_all = 0
+            sum_all = sum([np.sum(w_train[selIdxDict[label]]) for label in classes])
+            class_weight = [sum_all / np.sum(w_train[selIdxDict[label]]) for label in classes]
+            # w_collect = np.concatenate(
+            #     [w_train[selIdxDict[label]] * 1 / np.sum(w_train[selIdxDict[label]]) for label in classes])
+            w_collect = np.concatenate([w_train[selIdxDict[label]]*class_weight[i_label] for i_label, label in enumerate(classes)])
+            yield x_collect, y_collect, w_collect
 
-    #exy, exx, exw = next(balancedBatchGenerator(100))
+    exy, exx, exw = next(balancedBatchGenerator(100))
+
+    #print(exx,exw)
 
     # history = model.fit(
     #     [x_train, w_train],
@@ -260,7 +267,7 @@ def main(args, config):
         steps_per_epoch=len(x_train) // batch_size,
         epochs=config["model"]["epochs"],
         callbacks=callbacks,
-        validation_data=([x_test, w_test], y_test),
+        validation_data=(x_test, y_test, w_test),
         max_queue_size=10,
         workers=5,
         shuffle=True,
@@ -270,7 +277,8 @@ def main(args, config):
     path_history = os.path.join(config["output_path"],
                               "fold{}_keras_history.pickle".format(args.fold))
 
-    pickle.dump([history.history, metrics.get_data()], open(path_history, 'wb'))
+    #pickle.dump([history.history, metrics.get_data()], open(path_history, 'wb'))
+    pickle.dump([history.history], open(path_history, 'wb'))
 
     if not "save_best_only" in config["model"]:
         logger.info("Write model to %s.", path_model)
