@@ -195,11 +195,20 @@ def main(args, config):
     else:
         batch_size = config["model"]["batch_size"]
 
+    ###
+    classIndexDict={label:np.where(y_train[:,i_class]==1)[0] for i_class,label in enumerate(classes)}
+    if "steps_per_epoch" in config["model"]:
+        steps_per_epoch=int(config["model"]["steps_per_epoch"])
+        recommend_steps_per_epoch=int(min([len(classIndexDict[class_]) for class_ in classes])/(batch_size/len(classes)))+1
+        logger.info("steps_per_epoch: Using {} instead of recommended minimum of {}".format(str(steps_per_epoch), str(recommend_steps_per_epoch)))
+    else:
+        logger.info("model: steps_per_epoch: Not found in {} ",args.config)
+        raise Exception
+
     model_impl = getattr(keras_models, config["model"]["name"])
     model = model_impl(len(variables), len(classes))
     model.summary()
     if(args.balance_batches):
-        classIndexDict={label:np.where(y_train[:,i_class]==1)[0] for i_class,label in enumerate(classes)}
         def balancedBatchGenerator(batch_size):
             while True:
                 nperClass=int(batch_size/len(classes))
@@ -211,30 +220,23 @@ def main(args, config):
 
         def calculateValidationWeights(x_test, y_test, w_test):
             testIndexDict = {label: np.where(y_test[:, i_class] == 1)[0] for i_class, label in enumerate(classes)}
-            sum_all = 0
-            sum_class = dict()
-            for class_ in classes:
-                sum = np.sum(w_test[testIndexDict[class_]])
-                sum_all += sum
-                sum_class[class_] = sum
             y_collect = np.concatenate([y_train[testIndexDict[label]] for label in classes])
             x_collect = np.concatenate([x_train[testIndexDict[label], :] for label in classes])
+            ## len(x_test) for moving the validation loss to a useful scale
             w_collect = np.concatenate(
-                [w_test[testIndexDict[class_]] * (len(x_test) / sum_class[class_]) for class_ in classes])
-
+                [w_test[testIndexDict[class_]] * (len(x_test) / np.sum(w_test[testIndexDict[class_]])) for class_ in classes])
             return x_collect, y_collect, w_collect
 
         x_test, y_test, w_test = calculateValidationWeights(x_test, y_test, w_test)
 
         history = model.fit_generator(
             balancedBatchGenerator(batch_size=batch_size),
-            steps_per_epoch=len(x_train) // batch_size,
+            steps_per_epoch=steps_per_epoch,
             epochs=config["model"]["epochs"],
             callbacks=callbacks,
             validation_data=(x_test, y_test, w_test),
             max_queue_size=10,
             workers=5,
-            use_multiprocessing=True
             )
 
     else:

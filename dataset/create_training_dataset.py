@@ -2,7 +2,7 @@
 
 import ROOT
 ROOT.PyConfig.IgnoreCommandLineOptions = True  # disable ROOT internal argument parser
-ROOT.ROOT.EnableImplicitMT(); # Tell ROOT you want to go parallel
+ROOT.ROOT.EnableImplicitMT(12); # Tell ROOT you want to go parallel
 import argparse
 import yaml
 import os
