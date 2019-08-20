@@ -197,7 +197,7 @@ def main(args, config):
             ReduceLROnPlateau(
                 patience=config["model"]["reduce_lr_on_plateau"], verbose=1))
     metrics = significance(x_train=x_train, y_train=y_train, w_train=w_train)
-    #callbacks.append(metrics)
+    callbacks.append(metrics)
 
     # Train model
     if not hasattr(keras_models, config["model"]["name"]):
@@ -223,8 +223,8 @@ def main(args, config):
     #     y_test_list.append(y_test)
 
     model_impl = getattr(keras_models, config["model"]["name"])
-    #model = model_impl(len(variables), len(classes), classes, learning_rate)
-    model = model_impl(len(variables), len(classes))
+    model = model_impl(len(variables), len(classes), classes, learning_rate)
+    #model = model_impl(len(variables), len(classes))
     model.summary()
 
     # %%
@@ -242,15 +242,32 @@ def main(args, config):
             x_collect = np.concatenate([x_train[selIdxDict[label], :] for label in classes])
             sum_all = 0
             sum_all = sum([np.sum(w_train[selIdxDict[label]]) for label in classes])
-            class_weight = [sum_all / np.sum(w_train[selIdxDict[label]]) for label in classes]
+            class_weight = {label: (sum_all / np.sum(w_train[selIdxDict[label]])) for label in classes}
+            #print(class_weight)
+            #print(w_train[selIdxDict['qqh']]*class_weight['qqh'])
+            w_collect = np.concatenate([w_train[selIdxDict[label]]*class_weight[label] for label in classes])
             # w_collect = np.concatenate(
             #     [w_train[selIdxDict[label]] * 1 / np.sum(w_train[selIdxDict[label]]) for label in classes])
-            w_collect = np.concatenate([w_train[selIdxDict[label]]*class_weight[i_label] for i_label, label in enumerate(classes)])
-            yield x_collect, y_collect, w_collect
+            yield [x_collect, w_collect], y_collect
 
-    exy, exx, exw = next(balancedBatchGenerator(100))
+    def calculateValidationWeights(x_test, y_test, w_test):
+        testIndexDict = {label: np.where(y_test[:, i_class] == 1)[0] for i_class, label in enumerate(classes)}
+        sum_all = 0
+        sum_class = dict()
+        for class_ in classes:
+            sum = np.sum(w_test[testIndexDict[class_]])
+            sum_all += sum
+            sum_class[class_] = sum
+        y_collect = np.concatenate([y_train[testIndexDict[label]] for label in classes])
+        x_collect = np.concatenate([x_train[testIndexDict[label], :] for label in classes])
+        w_collect = np.concatenate([w_test[testIndexDict[class_]]*(sum_all/sum_class[class_]) for class_ in classes])
 
-    #print(exx,exw)
+        return x_collect, y_collect, w_collect
+
+
+    exi, exy = next(balancedBatchGenerator(100))
+
+    x_test, y_test, w_test = calculateValidationWeights(x_test, y_test, w_test)
 
     # history = model.fit(
     #     [x_train, w_train],
@@ -267,7 +284,7 @@ def main(args, config):
         steps_per_epoch=len(x_train) // batch_size,
         epochs=config["model"]["epochs"],
         callbacks=callbacks,
-        validation_data=(x_test, y_test, w_test),
+        validation_data=([x_test, w_test], y_test),
         max_queue_size=10,
         workers=5,
         shuffle=True,

@@ -102,8 +102,8 @@ def smhtt_significance_unbinned(num_inputs, num_outputs, output_names, learning_
         variable_loss = wrapped_partial(significance_unbinned_class, event_weights=weights, class_label=i)
         metrics.append(variable_loss)
 
-    #loss = wrapped_partial(significance_loss_unbinned(number_of_labels=num_outputs), weights=weights)
-    loss = wrapped_partial(loss_ce, weights=weights)
+    loss = wrapped_partial(significance_loss_unbinned(number_of_labels=num_outputs), weights=weights)
+    #loss = wrapped_partial(loss_ce, weights=weights)
 
     model.compile(loss=loss, optimizer=Adam(lr=1e-4), metrics=metrics)
 
