@@ -15,6 +15,7 @@ def parse_arguments():
         description="Train machine Keras models for Htt analyses")
     parser.add_argument("config", help="Path to training config file")
     parser.add_argument("fold", type=int, help="Select the fold to be trained")
+    parser.add_argument("--balance-batches", required=False, type=bool, default=False, help="Use a equal amount of events of each class in a batch and normalize those by dividing each individual event weigth by the sum of event weight of the respective class in that batch ")
     return parser.parse_args()
 
 
@@ -93,8 +94,10 @@ def main(args, config):
         w_class = np.zeros((tree.GetEntries(), 1))
         w_conv = root_numpy.tree2array(
             tree, branches=[config["event_weights"]])
-        w_class[:,
-                0] = w_conv[config["event_weights"]] * config["class_weights"][class_]
+        if args.balance_batches:
+            w_class[:,0] = w_conv[config["event_weights"]]
+        else:
+            w_class[:,0] = w_conv[config["event_weights"]] * config["class_weights"][class_]
         w.append(w_class)
 
         # Get targets for this class
@@ -195,15 +198,38 @@ def main(args, config):
     model_impl = getattr(keras_models, config["model"]["name"])
     model = model_impl(len(variables), len(classes))
     model.summary()
-    history = model.fit(
-        x_train,
-        y_train,
-        sample_weight=w_train,
-        validation_data=(x_test, y_test, w_test),
-        batch_size=batch_size,
-        nb_epoch=config["model"]["epochs"],
-        shuffle=True,
-        callbacks=callbacks)
+    if(args.balance_batches):
+        classIndexDict={label:np.where(y_train[:,i_class]==1)[0] for i_class,label in enumerate(classes)}
+        def balancedBatchGenerator(batch_size):
+            while True:
+                nperClass=int(batch_size/len(classes))
+                selIdxDict={label:classIndexDict[label][np.random.randint(0,len(classIndexDict[label]),nperClass)] for label in classes}
+                y_collect=np.concatenate([y_train[selIdxDict[label]] for label in classes])
+                x_collect=np.concatenate([x_train[selIdxDict[label],:] for label in classes])
+                w_collect=np.concatenate([w_train[selIdxDict[label]]*1/np.sum(w_train[selIdxDict[label]]) for label in classes])
+                yield x_collect, y_collect,w_collect
+        history=model.fit_generator(
+            balancedBatchGenerator(batch_size=batch_size),
+            steps_per_epoch=10,
+            epochs=config["model"]["epochs"],
+            callbacks=callbacks,
+            validation_data=(x_test, y_test, w_test),
+            max_queue_size=10,
+            workers=5,
+            #class_weights=,
+            use_multiprocessing=True
+            )
+
+    else:
+        history = model.fit(
+            x_train,
+            y_train,
+            sample_weight=w_train,
+            validation_data=(x_test, y_test, w_test),
+            batch_size=batch_size,
+            epochs=config["model"]["epochs"],
+            shuffle=True,
+            callbacks=callbacks)
 
     # Plot loss
     epochs = range(1, len(history.history["loss"]) + 1)
