@@ -206,17 +206,34 @@ def main(args, config):
                 selIdxDict={label:classIndexDict[label][np.random.randint(0,len(classIndexDict[label]),nperClass)] for label in classes}
                 y_collect=np.concatenate([y_train[selIdxDict[label]] for label in classes])
                 x_collect=np.concatenate([x_train[selIdxDict[label],:] for label in classes])
-                w_collect=np.concatenate([w_train[selIdxDict[label]]*1/np.sum(w_train[selIdxDict[label]]) for label in classes])
+                w_collect=np.concatenate([w_train[selIdxDict[label]]*(batch_size/np.sum(w_train[selIdxDict[label]])) for label in classes])
                 yield x_collect, y_collect,w_collect
-        history=model.fit_generator(
+
+        def calculateValidationWeights(x_test, y_test, w_test):
+            testIndexDict = {label: np.where(y_test[:, i_class] == 1)[0] for i_class, label in enumerate(classes)}
+            sum_all = 0
+            sum_class = dict()
+            for class_ in classes:
+                sum = np.sum(w_test[testIndexDict[class_]])
+                sum_all += sum
+                sum_class[class_] = sum
+            y_collect = np.concatenate([y_train[testIndexDict[label]] for label in classes])
+            x_collect = np.concatenate([x_train[testIndexDict[label], :] for label in classes])
+            w_collect = np.concatenate(
+                [w_test[testIndexDict[class_]] * (len(x_test) / sum_class[class_]) for class_ in classes])
+
+            return x_collect, y_collect, w_collect
+
+        x_test, y_test, w_test = calculateValidationWeights(x_test, y_test, w_test)
+
+        history = model.fit_generator(
             balancedBatchGenerator(batch_size=batch_size),
-            steps_per_epoch=10,
+            steps_per_epoch=len(x_train) // batch_size,
             epochs=config["model"]["epochs"],
             callbacks=callbacks,
             validation_data=(x_test, y_test, w_test),
             max_queue_size=10,
             workers=5,
-            #class_weights=,
             use_multiprocessing=True
             )
 
