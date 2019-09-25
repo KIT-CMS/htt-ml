@@ -21,7 +21,7 @@ def parse_arguments():
 
 def parse_config(filename):
     logger.debug("Parse config.")
-    return yaml.load(open(filename, "r"))
+    return yaml.load(open(filename, "r"),Loader=yaml.Loader)
 
 
 def setup_logging(level, output_file=None):
@@ -39,6 +39,7 @@ def setup_logging(level, output_file=None):
 
 
 def main(args, config):
+    logger.info(args)
     # Set seed and import packages
     # NOTE: This need to be done before any keras module is imported!
     logger.debug("Import packages and set random seed to %s.",
@@ -54,6 +55,15 @@ def main(args, config):
     import matplotlib as mpl
     mpl.use('Agg')
     import matplotlib.pyplot as plt
+
+    import tensorflow as tf
+    logger.debug(tf.__file__)
+    tf.set_random_seed(int(config["seed"]))
+    from keras.backend.tensorflow_backend import set_session
+    tfconfig = tf.ConfigProto()
+    tfconfig.gpu_options.allow_growth = True
+    set_session(tf.Session(config=tfconfig))
+
 
     from sklearn import preprocessing, model_selection
     import keras_models
@@ -104,6 +114,7 @@ def main(args, config):
         y_class = np.zeros((tree.GetEntries(), len(classes)))
         y_class[:, i_class] = np.ones((tree.GetEntries()))
         y.append(y_class)
+    del x_class, y_class, w_class
 
     # Stack inputs, targets and weights to a Keras-readable dataset
     x = np.vstack(x)  # inputs
@@ -160,7 +171,7 @@ def main(args, config):
         w,
         test_size=1.0 - config["train_test_split"],
         random_state=int(config["seed"]))
-
+    del x,y,w
     # Add callbacks
     callbacks = []
     if "early_stopping" in config["model"]:
@@ -209,6 +220,7 @@ def main(args, config):
     model = model_impl(len(variables), len(classes))
     model.summary()
     if(args.balance_batches):
+        logger.info("Running on balanced batches.")
         def balancedBatchGenerator(batch_size):
             while True:
                 nperClass=int(batch_size/len(classes))
@@ -269,7 +281,7 @@ def main(args, config):
 
 
 if __name__ == "__main__":
-    setup_logging(logging.DEBUG)
     args = parse_arguments()
     config = parse_config(args.config)
+    setup_logging(logging.DEBUG,"{}/training{}.log".format(config["output_path"], args.fold))
     main(args, config)
