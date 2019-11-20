@@ -205,7 +205,7 @@ def main(args, config_test, config_train):
 if __name__ == "__main__":
     args = parse_arguments()
     config_test = parse_config(args.config_testing)
-    print(config_test)
+    logger.info(config_test)
     config_train = parse_config(args.config_training)
-    print({key: value for key,value in config_train.items() if key !="processes"})
+    logger.info({key: value for key,value in config_train.items() if key !="processes"})
     main(args, config_test, config_train)
