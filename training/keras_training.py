@@ -21,7 +21,7 @@ def parse_arguments():
 
 def parse_config(filename):
     logger.debug("Parse config.")
-    return yaml.load(open(filename, "r"))
+    return yaml.load(open(filename, "r"),Loader=yaml.Loader)
 
 
 def setup_logging(level, output_file=None):
@@ -39,6 +39,7 @@ def setup_logging(level, output_file=None):
 
 
 def main(args, config):
+    logger.info(args)
     # Set seed and import packages
     # NOTE: This need to be done before any keras module is imported!
     logger.debug("Import packages and set random seed to %s.",
@@ -54,6 +55,15 @@ def main(args, config):
     import matplotlib as mpl
     mpl.use('Agg')
     import matplotlib.pyplot as plt
+
+    import tensorflow as tf
+    logger.debug(tf.__file__)
+    tf.set_random_seed(int(config["seed"]))
+    from keras.backend.tensorflow_backend import set_session
+    tfconfig = tf.ConfigProto()
+    tfconfig.gpu_options.allow_growth = True
+    set_session(tf.Session(config=tfconfig))
+
 
     from sklearn import preprocessing, model_selection
     import keras_models
@@ -104,6 +114,7 @@ def main(args, config):
         y_class = np.zeros((tree.GetEntries(), len(classes)))
         y_class[:, i_class] = np.ones((tree.GetEntries()))
         y.append(y_class)
+    del x_class, y_class, w_class
 
     # Stack inputs, targets and weights to a Keras-readable dataset
     x = np.vstack(x)  # inputs
@@ -160,7 +171,7 @@ def main(args, config):
         w,
         test_size=1.0 - config["train_test_split"],
         random_state=int(config["seed"]))
-
+    del x,y,w
     # Add callbacks
     callbacks = []
     if "early_stopping" in config["model"]:
@@ -195,11 +206,21 @@ def main(args, config):
     else:
         batch_size = config["model"]["batch_size"]
 
+    ###
+    classIndexDict={label:np.where(y_train[:,i_class]==1)[0] for i_class,label in enumerate(classes)}
+    if "steps_per_epoch" in config["model"]:
+        steps_per_epoch=int(config["model"]["steps_per_epoch"])
+        recommend_steps_per_epoch=int(min([len(classIndexDict[class_]) for class_ in classes])/(batch_size/len(classes)))+1
+        logger.info("steps_per_epoch: Using {} instead of recommended minimum of {}".format(str(steps_per_epoch), str(recommend_steps_per_epoch)))
+    else:
+        logger.info("model: steps_per_epoch: Not found in {} ",args.config)
+        raise Exception
+
     model_impl = getattr(keras_models, config["model"]["name"])
     model = model_impl(len(variables), len(classes))
     model.summary()
     if(args.balance_batches):
-        classIndexDict={label:np.where(y_train[:,i_class]==1)[0] for i_class,label in enumerate(classes)}
+        logger.info("Running on balanced batches.")
         def balancedBatchGenerator(batch_size):
             while True:
                 nperClass=int(batch_size/len(classes))
@@ -211,30 +232,23 @@ def main(args, config):
 
         def calculateValidationWeights(x_test, y_test, w_test):
             testIndexDict = {label: np.where(y_test[:, i_class] == 1)[0] for i_class, label in enumerate(classes)}
-            sum_all = 0
-            sum_class = dict()
-            for class_ in classes:
-                sum = np.sum(w_test[testIndexDict[class_]])
-                sum_all += sum
-                sum_class[class_] = sum
             y_collect = np.concatenate([y_train[testIndexDict[label]] for label in classes])
             x_collect = np.concatenate([x_train[testIndexDict[label], :] for label in classes])
+            ## len(x_test) for moving the validation loss to a useful scale
             w_collect = np.concatenate(
-                [w_test[testIndexDict[class_]] * (len(x_test) / sum_class[class_]) for class_ in classes])
-
+                [w_test[testIndexDict[class_]] * (len(x_test) / np.sum(w_test[testIndexDict[class_]])) for class_ in classes])
             return x_collect, y_collect, w_collect
 
         x_test, y_test, w_test = calculateValidationWeights(x_test, y_test, w_test)
 
         history = model.fit_generator(
             balancedBatchGenerator(batch_size=batch_size),
-            steps_per_epoch=len(x_train) // batch_size,
+            steps_per_epoch=steps_per_epoch,
             epochs=config["model"]["epochs"],
             callbacks=callbacks,
             validation_data=(x_test, y_test, w_test),
             max_queue_size=10,
             workers=5,
-            use_multiprocessing=True
             )
 
     else:
@@ -267,7 +281,7 @@ def main(args, config):
 
 
 if __name__ == "__main__":
-    setup_logging(logging.DEBUG)
     args = parse_arguments()
     config = parse_config(args.config)
+    setup_logging(logging.DEBUG,"{}/training{}.log".format(config["output_path"], args.fold))
     main(args, config)

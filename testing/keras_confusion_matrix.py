@@ -128,15 +128,12 @@ def main(args, config_test, config_train):
         dtype=np.float)
     class_weights = config_train["class_weights"]
     for i_class, class_ in enumerate(config_train["classes"]):
-        logger.debug("Process class %s.", class_)
+        logger.debug("Process class %s. with weight %s", class_,class_weights[class_])
 
         tree = file_.Get(class_)
         if tree == None:
             logger.fatal("Tree %s does not exist.", class_)
             raise Exception
-        friend_trees_names = [k.GetName() for k in file_.GetListOfKeys() if k.GetName().startswith("_".join([class_,"friend"]))]
-        for friend in friend_trees_names:
-            tree.AddFriend(friend)
 
         values = []
         for variable in config_train["variables"]:
@@ -150,8 +147,8 @@ def main(args, config_test, config_train):
                 raise Exception
             tree.SetBranchAddress(variable, values[-1])
 
-        if tree.GetLeaf(variable).GetTypeName() != "Float_t":
-            logger.fatal("Weight branch has unkown type.")
+        if tree.GetLeaf(config_test["weight_branch"]).GetTypeName() != "Float_t":
+            logger.fatal("Weight branch has unkown type: {}".format(tree.GetLeaf(config_test["weight_branch"]).GetTypeName()))
             raise Exception
         weight = array("f", [-999])
         tree.SetBranchAddress(config_test["weight_branch"], weight)
@@ -208,5 +205,7 @@ def main(args, config_test, config_train):
 if __name__ == "__main__":
     args = parse_arguments()
     config_test = parse_config(args.config_testing)
+    logger.info(config_test)
     config_train = parse_config(args.config_training)
+    logger.info({key: value for key,value in config_train.items() if key !="processes"})
     main(args, config_test, config_train)

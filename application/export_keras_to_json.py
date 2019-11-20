@@ -24,7 +24,7 @@ def main(args, config_training, config_application):
         "class_labels" : config_training["classes"],
         "inputs" : [{"name" : v, "offset" : 0.0, "scale" : 1.0} for v in config_training["variables"]]
     } 
-    
+    mldir=config_training["output_path"]+"/"
     # Load keras model and preprocessing
     for c, p, w, v, a in zip(config_application["classifiers"],
                              config_application["preprocessing"],
@@ -32,6 +32,11 @@ def main(args, config_training, config_application):
                              config_application["variable_exports"],
                              config_application["architecture_exports"]):
         # export weights in .h5 format & model in .json format
+        c=mldir+c
+        p=mldir+p
+        w=mldir+w
+        v=mldir+v
+        a=mldir+a
         model = load_model(c)
         model.save_weights(w)
         with open(a, "w") as f:
