@@ -15,6 +15,7 @@ def parse_arguments():
         description="Train machine Keras models for Htt analyses")
     parser.add_argument("config", help="Path to training config file")
     parser.add_argument("fold", type=int, help="Select the fold to be trained")
+    parser.add_argument("--conditional", required=False, type=bool, default=False, help="Use one network for all eras or separate networks.")
     parser.add_argument("--balance-batches", required=False, type=bool, default=False, help="Use a equal amount of events of each class in a batch and normalize those by dividing each individual event weigth by the sum of event weight of the respective class in that batch ")
     return parser.parse_args()
 
@@ -76,53 +77,101 @@ def main(args, config):
         logger.debug("%s", v)
 
     # Load training dataset
-    filename = config["datasets"][args.fold]
-    logger.debug("Load training dataset from %s.", filename)
+    if args.conditional:
+        args.balanced_batches = True
+        eras = ['2016', '2017', '2018']
+        len_eras = len(eras)
+    else:
+        eras = ['all']
+        len_eras = 0
     x = []
     y = []
     w = []
-    rfile = ROOT.TFile(filename, "READ")
+    z = []
     classes = config["classes"]
-    for i_class, class_ in enumerate(classes):
-        logger.debug("Process class %s.", class_)
-        tree = rfile.Get(class_)
-        if tree == None:
-            logger.fatal("Tree %s not found in file %s.", class_, filename)
-            raise Exception
-        friend_trees_names = [k.GetName() for k in rfile.GetListOfKeys() if k.GetName().startswith("_".join([class_,"friend"]))]
-        for friend in friend_trees_names:
-            tree.AddFriend(friend)
-
-        # Get inputs for this class
-        x_class = np.zeros((tree.GetEntries(), len(variables)))
-        x_conv = root_numpy.tree2array(tree, branches=variables)
-        for i_var, var in enumerate(variables):
-            x_class[:, i_var] = x_conv[var]
-        x.append(x_class)
-
-        # Get weights
-        w_class = np.zeros((tree.GetEntries(), 1))
-        w_conv = root_numpy.tree2array(
-            tree, branches=[config["event_weights"]])
-        if args.balance_batches:
-            w_class[:,0] = w_conv[config["event_weights"]]
+    for i_era, era in enumerate(eras):
+        if args.conditional:
+            filename = config["datasets_{}".format(era)][args.fold]
         else:
-            w_class[:,0] = w_conv[config["event_weights"]] * config["class_weights"][class_]
-        w.append(w_class)
+            filename = config["datasets"][args.fold]
+        logger.debug("Load training dataset from {}.".format(filename))
+        rfile = ROOT.TFile(filename, "READ")
+        x_era = []
+        y_era = []
+        w_era = []
+        for i_class, class_ in enumerate(classes):
+            logger.debug("Process class %s.", class_)
+            tree = rfile.Get(class_)
+            if tree == None:
+                logger.fatal("Tree %s not found in file %s.", class_, filename)
+                raise Exception
+            friend_trees_names = [k.GetName() for k in rfile.GetListOfKeys() if
+                                  k.GetName().startswith("_".join([class_, "friend"]))]
+            for friend in friend_trees_names:
+                tree.AddFriend(friend)
 
-        # Get targets for this class
-        y_class = np.zeros((tree.GetEntries(), len(classes)))
-        y_class[:, i_class] = np.ones((tree.GetEntries()))
-        y.append(y_class)
-    del x_class, y_class, w_class
+            # Get inputs for this class
+
+            x_class = np.zeros((tree.GetEntries(), len(variables) + len_eras))
+            x_conv = root_numpy.tree2array(tree, branches=variables)
+            for i_var, var in enumerate(variables):
+                x_class[:, i_var] = x_conv[var]
+
+            # One hot encode eras if conditional
+            if class_ == 'ggh' or class_ == 'qqh':
+                random_era = np.zeros((tree.GetEntries(), len_eras))
+                for event in random_era:
+                    idx = np.random.randint(3, size=1)
+                    event[idx] = 1
+                x_class[:, -3:] = random_era
+            else:
+                if era == "2016":
+                    x_class[:, -3] = np.ones((tree.GetEntries()))
+                elif era == "2017":
+                    x_class[:, -2] = np.ones((tree.GetEntries()))
+                elif era == "2018":
+                    x_class[:, -1] = np.ones((tree.GetEntries()))
+            x_era.append(x_class)
+
+            # Get weights
+            w_class = np.zeros((tree.GetEntries(), 1))
+            w_conv = root_numpy.tree2array(
+                tree, branches=[config["event_weights"]])
+            if args.balance_batches:
+                w_class[:, 0] = w_conv[config["event_weights"]]
+            else:
+                w_class[:, 0] = w_conv[config["event_weights"]] * config["class_weights"][class_]
+            w_era.append(w_class)
+
+            # Get targets for this class
+            y_class = np.zeros((tree.GetEntries(), len(classes)))
+            y_class[:, i_class] = np.ones((tree.GetEntries()))
+            y_era.append(y_class)
+
+        # Stack inputs, targets and weights to a Keras-readable dataset
+        x_era = np.vstack(x_era)  # inputs
+        y_era = np.vstack(y_era)  # targets
+        w_era = np.vstack(w_era)  # weights
+        z_era = np.zeros((y_era.shape[0], len_eras))
+        if args.conditional:
+            z_era[:, i_era] = np.ones((y_era.shape[0]))
+        x.append(x_era)
+        y.append(y_era)
+        w.append(w_era)
+        z.append(z_era)
 
     # Stack inputs, targets and weights to a Keras-readable dataset
     x = np.vstack(x)  # inputs
     y = np.vstack(y)  # targets
-    w = np.vstack(w) * config["global_weight_scale"]  # weights
+    w = np.vstack(w)  # weights
     w = np.squeeze(w)  # needed to get weights into keras
+    z = np.vstack(z)
 
-    # Perform input variable transformation and pickle scaler object
+
+
+    # Perform input variable transformation and pickle scaler object.
+    # Only perform transformation on continuous variables
+    x_scaler = x[:, :len(variables)]
     logger.info("Use preprocessing method %s.", config["preprocessing"])
     if "standard_scaler" in config["preprocessing"]:
         scaler = preprocessing.StandardScaler().fit(x)
@@ -156,7 +205,7 @@ def main(args, config):
         logger.fatal("Preprocessing %s is not implemented.",
                      config["preprocessing"])
         raise Exception
-    x = scaler.transform(x)
+    x[:,:len(variables)] = scaler.transform(x_scaler)
 
     path_preprocessing = os.path.join(
         config["output_path"],
@@ -165,10 +214,11 @@ def main(args, config):
     pickle.dump(scaler, open(path_preprocessing, 'wb'))
 
     # Split data in training and testing
-    x_train, x_test, y_train, y_test, w_train, w_test = model_selection.train_test_split(
+    x_train, x_test, y_train, y_test, w_train, w_test, z_train, z_test = model_selection.train_test_split(
         x,
         y,
         w,
+        z,
         test_size=1.0 - config["train_test_split"],
         random_state=int(config["seed"]))
     del x,y,w
@@ -217,10 +267,14 @@ def main(args, config):
         raise Exception
 
     model_impl = getattr(keras_models, config["model"]["name"])
-    model = model_impl(len(variables), len(classes))
+    model = model_impl(len(variables) + len_eras, len(classes))
     model.summary()
     if(args.balance_batches):
         logger.info("Running on balanced batches.")
+        if args.conditional:
+            eraIndexDict={era: {label: np.where((z_train[:,i_era] == 1) & (y_train[:,i_class] == 1))[0] for i_class, label in enumerate(classes)} for i_era, era in enumerate(eras)}
+        else:
+            classIndexDict={label:np.where(y_train[:,i_class]==1)[0] for i_class,label in enumerate(classes)}
         def balancedBatchGenerator(batch_size):
             while True:
                 nperClass=int(batch_size/len(classes))
