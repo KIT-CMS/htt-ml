@@ -6,11 +6,20 @@ import copy
 
 from keras.models import load_model
 
+import logging
+logger = logging.getLogger("Export keras to json")
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler()
+formatter = logging.Formatter("%(name)s - %(levelname)s - %(message)s")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Export model for Htt analyses to .json format")
     parser.add_argument("config_training", help="Path to training config file")
     parser.add_argument("config_application", help="Path to application config file")
+    parser.add_argument("--conditional", required=False, type=bool, default=False, help="Use one network for all eras or separate networks.")
     return parser.parse_args()
 
 
@@ -20,9 +29,14 @@ def parse_config(filename):
 
 def main(args, config_training, config_application):
     # Create template dictionary for variables.json
+    logger.info("Use conditional network: {}".format(args.conditional))
+    if args.conditional:
+        eras = ["2016", "2017", "2018"]
+    else:
+        eras = []
     variables_template = {
         "class_labels" : config_training["classes"],
-        "inputs" : [{"name" : v, "offset" : 0.0, "scale" : 1.0} for v in config_training["variables"]]
+        "inputs" : [{"name" : v, "offset" : 0.0, "scale" : 1.0} for v in config_training["variables"] + eras]
     } 
     mldir=config_training["output_path"]+"/"
     # Load keras model and preprocessing

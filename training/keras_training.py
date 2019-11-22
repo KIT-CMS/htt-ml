@@ -16,6 +16,7 @@ def parse_arguments():
     parser.add_argument("config", help="Path to training config file")
     parser.add_argument("fold", type=int, help="Select the fold to be trained")
     parser.add_argument("--conditional", required=False, type=bool, default=False, help="Use one network for all eras or separate networks.")
+    parser.add_argument("--randomization", required=False, type=bool, default=False, help="Randomize signal classes for conditional training in case one era has insufficient signal data.")
     parser.add_argument("--balance-batches", required=False, type=bool, default=False, help="Use a equal amount of events of each class in a batch and normalize those by dividing each individual event weigth by the sum of event weight of the respective class in that batch ")
     return parser.parse_args()
 
@@ -118,19 +119,20 @@ def main(args, config):
                 x_class[:, i_var] = x_conv[var]
 
             # One hot encode eras if conditional
-            if class_ == 'ggh' or class_ == 'qqh':
-                random_era = np.zeros((tree.GetEntries(), len_eras))
-                for event in random_era:
-                    idx = np.random.randint(3, size=1)
-                    event[idx] = 1
-                x_class[:, -3:] = random_era
-            else:
-                if era == "2016":
-                    x_class[:, -3] = np.ones((tree.GetEntries()))
-                elif era == "2017":
-                    x_class[:, -2] = np.ones((tree.GetEntries()))
-                elif era == "2018":
-                    x_class[:, -1] = np.ones((tree.GetEntries()))
+            if args.conditional:
+                if class_ == 'ggh' or class_ == 'qqh':
+                    random_era = np.zeros((tree.GetEntries(), len_eras))
+                    for event in random_era:
+                        idx = np.random.randint(3, size=1)
+                        event[idx] = 1
+                    x_class[:, -3:] = random_era
+                else:
+                    if era == "2016":
+                        x_class[:, -3] = np.ones((tree.GetEntries()))
+                    elif era == "2017":
+                        x_class[:, -2] = np.ones((tree.GetEntries()))
+                    elif era == "2018":
+                        x_class[:, -1] = np.ones((tree.GetEntries()))
             x_era.append(x_class)
 
             # Get weights
@@ -152,9 +154,8 @@ def main(args, config):
         x_era = np.vstack(x_era)  # inputs
         y_era = np.vstack(y_era)  # targets
         w_era = np.vstack(w_era)  # weights
-        z_era = np.zeros((y_era.shape[0], len_eras))
-        if args.conditional:
-            z_era[:, i_era] = np.ones((y_era.shape[0]))
+        z_era = np.zeros((y_era.shape[0], len(eras)))
+        z_era[:, i_era] = np.ones((y_era.shape[0]))
         x.append(x_era)
         y.append(y_era)
         w.append(w_era)
@@ -174,12 +175,12 @@ def main(args, config):
     x_scaler = x[:, :len(variables)]
     logger.info("Use preprocessing method %s.", config["preprocessing"])
     if "standard_scaler" in config["preprocessing"]:
-        scaler = preprocessing.StandardScaler().fit(x)
+        scaler = preprocessing.StandardScaler().fit(x_scaler)
         for var, mean, std in zip(variables, scaler.mean_, scaler.scale_):
             logger.debug("Preprocessing (variable, mean, std): %s, %s, %s",
                          var, mean, std)
     elif "identity" in config["preprocessing"]:
-        scaler = preprocessing.StandardScaler().fit(x)
+        scaler = preprocessing.StandardScaler().fit(x_scaler)
         for i in range(len(scaler.mean_)):
             scaler.mean_[i] = 0.0
             scaler.scale_[i] = 1.0
@@ -187,12 +188,12 @@ def main(args, config):
             logger.debug("Preprocessing (variable, mean, std): %s, %s, %s",
                          var, mean, std)
     elif "robust_scaler" in config["preprocessing"]:
-        scaler = preprocessing.RobustScaler().fit(x)
+        scaler = preprocessing.RobustScaler().fit(x_scaler)
         for var, mean, std in zip(variables, scaler.center_, scaler.scale_):
             logger.debug("Preprocessing (variable, mean, std): %s, %s, %s",
                          var, mean, std)
     elif "min_max_scaler" in config["preprocessing"]:
-        scaler = preprocessing.MinMaxScaler(feature_range=(-1.0, 1.0)).fit(x)
+        scaler = preprocessing.MinMaxScaler(feature_range=(-1.0, 1.0)).fit(x_scaler)
         for var, min_, max_ in zip(variables, scaler.data_min_,
                                    scaler.data_max_):
             logger.debug("Preprocessing (variable, min, max): %s, %s, %s", var,
@@ -200,7 +201,7 @@ def main(args, config):
     elif "quantile_transformer" in config["preprocessing"]:
         scaler = preprocessing.QuantileTransformer(
             output_distribution="normal",
-            random_state=int(config["seed"])).fit(x)
+            random_state=int(config["seed"])).fit(x_scaler)
     else:
         logger.fatal("Preprocessing %s is not implemented.",
                      config["preprocessing"])
@@ -263,7 +264,7 @@ def main(args, config):
         recommend_steps_per_epoch=int(min([len(classIndexDict[class_]) for class_ in classes])/(batch_size/len(classes)))+1
         logger.info("steps_per_epoch: Using {} instead of recommended minimum of {}".format(str(steps_per_epoch), str(recommend_steps_per_epoch)))
     else:
-        logger.info("model: steps_per_epoch: Not found in {} ",args.config)
+        logger.info("model: steps_per_epoch: Not found in {} ".format(args.config))
         raise Exception
 
     model_impl = getattr(keras_models, config["model"]["name"])
@@ -271,26 +272,26 @@ def main(args, config):
     model.summary()
     if(args.balance_batches):
         logger.info("Running on balanced batches.")
-        if args.conditional:
-            eraIndexDict={era: {label: np.where((z_train[:,i_era] == 1) & (y_train[:,i_class] == 1))[0] for i_class, label in enumerate(classes)} for i_era, era in enumerate(eras)}
-        else:
-            classIndexDict={label:np.where(y_train[:,i_class]==1)[0] for i_class,label in enumerate(classes)}
+        eraIndexDict={era: {label: np.where((z_train[:,i_era] == 1) & (y_train[:,i_class] == 1))[0] for i_class, label in enumerate(classes)} for i_era, era in enumerate(eras)}
         def balancedBatchGenerator(batch_size):
             while True:
-                nperClass=int(batch_size/len(classes))
-                selIdxDict={label:classIndexDict[label][np.random.randint(0,len(classIndexDict[label]),nperClass)] for label in classes}
-                y_collect=np.concatenate([y_train[selIdxDict[label]] for label in classes])
-                x_collect=np.concatenate([x_train[selIdxDict[label],:] for label in classes])
-                w_collect=np.concatenate([w_train[selIdxDict[label]]*(batch_size/np.sum(w_train[selIdxDict[label]])) for label in classes])
+                nperClass=int(batch_size/(len(classes)*len(eras)))
+                selIdxDict={era: {label:eraIndexDict[era][label][np.random.randint(0,len(eraIndexDict[era][label]),nperClass)] for label in classes} for era in eras}
+                y_collect=np.concatenate([y_train[selIdxDict[era][label]] for label in classes for era in eras])
+                x_collect=np.concatenate([x_train[selIdxDict[era][label],:] for label in classes for era in eras])
+                w_collect=np.concatenate([w_train[selIdxDict[era][label]]*(batch_size/np.sum(w_train[selIdxDict[era][label]])) for label in classes for era in eras])
                 yield x_collect, y_collect,w_collect
 
         def calculateValidationWeights(x_test, y_test, w_test):
-            testIndexDict = {label: np.where(y_test[:, i_class] == 1)[0] for i_class, label in enumerate(classes)}
-            y_collect = np.concatenate([y_train[testIndexDict[label]] for label in classes])
-            x_collect = np.concatenate([x_train[testIndexDict[label], :] for label in classes])
-            ## len(x_test) for moving the validation loss to a useful scale
+            testIndexDict = {
+                era: {label: np.where((z_test[:, i_era] == 1) & (y_test[:, i_class] == 1))[0] for i_class, label in
+                      enumerate(classes)} for i_era, era in enumerate(eras)}
+
+            y_collect = np.concatenate([y_train[testIndexDict[era][label]] for label in classes for era in eras])
+            x_collect = np.concatenate([x_train[testIndexDict[era][label], :] for label in classes for era in eras])
             w_collect = np.concatenate(
-                [w_test[testIndexDict[class_]] * (len(x_test) / np.sum(w_test[testIndexDict[class_]])) for class_ in classes])
+                [w_test[testIndexDict[era][class_]] * (len(x_test) / np.sum(w_test[testIndexDict[era][class_]])) for class_ in classes for era in eras])
+
             return x_collect, y_collect, w_collect
 
         x_test, y_test, w_test = calculateValidationWeights(x_test, y_test, w_test)
@@ -337,5 +338,5 @@ def main(args, config):
 if __name__ == "__main__":
     args = parse_arguments()
     config = parse_config(args.config)
-    setup_logging(logging.DEBUG,"{}/training{}.log".format(config["output_path"], args.fold))
+    setup_logging(logging.DEBUG)
     main(args, config)
