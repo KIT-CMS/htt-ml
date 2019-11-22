@@ -120,7 +120,7 @@ def main(args, config):
 
             # One hot encode eras if conditional
             if args.conditional:
-                if class_ == 'ggh' or class_ == 'qqh':
+                if (class_ == 'ggh' or class_ == 'qqh') and args.randomization:
                     random_era = np.zeros((tree.GetEntries(), len_eras))
                     for event in random_era:
                         idx = np.random.randint(3, size=1)
