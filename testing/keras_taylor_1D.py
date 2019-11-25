@@ -38,6 +38,7 @@ def parse_arguments():
     parser.add_argument("config_training", help="Path to training config file")
     parser.add_argument("config_testing", help="Path to testing config file")
     parser.add_argument("fold", type=int, help="Trained model to be tested.")
+    parser.add_argument("--era", required=False, type=int, default=None, help="Era to be tested.")
     parser.add_argument(
         "--no-abs",
         action="store_true",
@@ -69,8 +70,16 @@ def main(args, config_test, config_train):
     logger.info("Load keras model %s.", path)
     model_keras = load_model(path)
 
+    # Define eras
+    if args.era:
+        eras = ["2016", "2017", "2018"]
+        path = os.path.join(config_train["datasets_{}".format(args.era)][(1, 0)[args.fold]])
+    else:
+        eras = []
+        path = os.path.join(config_train["datasets"][(1, 0)[args.fold]])
+
     # Get TensorFlow graph
-    inputs = Inputs(config_train["variables"])
+    inputs = Inputs(config_train["variables"] + eras)
 
     try:
         sys.path.append("htt-ml/training")
@@ -99,11 +108,10 @@ def main(args, config_test, config_train):
     derivatives = Derivatives(inputs, outputs)
     for class_ in config_train["classes"]:
         deriv_ops[class_] = []
-        for variable in config_train["variables"]:
+        for variable in config_train["variables"] + eras:
             deriv_ops[class_].append(derivatives.get(class_, [variable]))
 
     # Loop over testing dataset
-    path = os.path.join(config_train["datasets"][(1, 0)[args.fold]])
     logger.info("Loop over test dataset %s to get model response.", path)
     file_ = ROOT.TFile(path)
     mean_abs_deriv = {}
@@ -137,7 +145,7 @@ def main(args, config_test, config_train):
         tree.SetBranchAddress(config_test["weight_branch"], weight)
 
         deriv_class = np.zeros((tree.GetEntries(),
-                                len(config_train["variables"])))
+                                len(config_train["variables"]) + len(eras)))
         weights = np.zeros((tree.GetEntries()))
 
         for i_event in range(tree.GetEntries()):
@@ -146,6 +154,18 @@ def main(args, config_test, config_train):
             # Preprocessing
             values_stacked = np.hstack(values).reshape(1, len(values))
             values_preprocessed = preprocessing.transform(values_stacked)
+            if args.era:
+                if str(args.era) == "2016":
+                    values_preprocessed = np.expand_dims(np.concatenate((np.squeeze(values_preprocessed), [1, 0, 0])),
+                                                         axis=0)
+                elif str(args.era) == "2017":
+                    values_preprocessed = np.expand_dims(np.concatenate((np.squeeze(values_preprocessed), [0, 1, 0])),
+                                                         axis=0)
+                elif str(args.era) == "2018":
+                    values_preprocessed = np.expand_dims(np.concatenate((np.squeeze(values_preprocessed), [0, 0, 1])),
+                                                         axis=0)
+                else:
+                    logger.error('Era not found, exiting.')
 
             # Keras inference
             response = model_keras.predict(values_preprocessed)
@@ -194,7 +214,7 @@ def main(args, config_test, config_train):
                 matrix[i_class, :])
 
     # Plotting
-    variables = config_train["variables"]
+    variables = config_train["variables"] + eras
     plt.figure(0, figsize=(len(variables), len(classes)))
     axis = plt.gca()
     for i in range(matrix.shape[0]):
@@ -212,10 +232,11 @@ def main(args, config_test, config_train):
         np.array(range(len(variables))) + 0.5, variables, rotation='vertical')
     plt.yticks(
         np.array(range(len(classes))) + 0.5, classes, rotation='horizontal')
-    plt.xlim(0, len(config_train["variables"]))
-    plt.ylim(0, len(config_train["classes"]))
+    plt.xlim(0, len(variables))
+    plt.ylim(0, len(classes))
+    plot_name_era = "_{}".format(args.era) if args.era else ""
     output_path = os.path.join(config_train["output_path"],
-                               "fold{}_keras_taylor_1D".format(args.fold))
+                               "fold{}_keras_taylor_1D{}".format(args.fold, plot_name_era))
     logger.info("Save plot to {}.".format(output_path))
     plt.savefig(output_path+".png", bbox_inches='tight')
     plt.savefig(output_path+".pdf", bbox_inches='tight')
