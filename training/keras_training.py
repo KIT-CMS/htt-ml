@@ -83,12 +83,12 @@ def main(args, config):
         eras = ['2016', '2017', '2018']
         len_eras = len(eras)
     else:
-        eras = ['all']
+        eras = ['any']
         len_eras = 0
-    x = []
-    y = []
-    w = []
-    z = []
+    x = [] # Training input
+    y = [] # Target classes
+    w = [] # Weights for training
+    z = [] # Era information for batching
     classes = config["classes"]
     for i_era, era in enumerate(eras):
         if args.conditional:
@@ -154,7 +154,7 @@ def main(args, config):
         x_era = np.vstack(x_era)  # inputs
         y_era = np.vstack(y_era)  # targets
         w_era = np.vstack(w_era)  # weights
-        z_era = np.zeros((y_era.shape[0], len(eras)))
+        z_era = np.zeros((y_era.shape[0], len(eras))) # era information
         z_era[:, i_era] = np.ones((y_era.shape[0]))
         x.append(x_era)
         y.append(y_era)
@@ -166,7 +166,7 @@ def main(args, config):
     y = np.vstack(y)  # targets
     w = np.vstack(w)  # weights
     w = np.squeeze(w)  # needed to get weights into keras
-    z = np.vstack(z)
+    z = np.vstack(z) # era information
 
 
 
@@ -272,6 +272,7 @@ def main(args, config):
     model.summary()
     if(args.balance_batches):
         logger.info("Running on balanced batches.")
+        # Loop over all eras and classes to divide the batch equally, defines the indices of the corrects answers for each era/class combination
         eraIndexDict={era: {label: np.where((z_train[:,i_era] == 1) & (y_train[:,i_class] == 1))[0] for i_class, label in enumerate(classes)} for i_era, era in enumerate(eras)}
         def balancedBatchGenerator(batch_size):
             while True:
@@ -338,5 +339,5 @@ def main(args, config):
 if __name__ == "__main__":
     args = parse_arguments()
     config = parse_config(args.config)
-    setup_logging(logging.DEBUG)
+    setup_logging(logging.DEBUG, "{}/training{}.log".format(config["output_path"], args.fold))
     main(args, config)
