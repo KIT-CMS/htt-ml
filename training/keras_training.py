@@ -272,10 +272,10 @@ def main(args, config):
         raise Exception
     logger.info("Train keras model %s.", config["model"]["name"])
 
-    if config["model"]["batch_size"] < 0:
-        batch_size = x_train.shape[0]
+    if config["model"]["eventsPerClassAndBatch"] < 0:
+        eventsPerClassAndBatch = x_train.shape[0]*len(classes)
     else:
-        batch_size = config["model"]["batch_size"]
+        eventsPerClassAndBatch = config["model"]["eventsPerClassAndBatch"]
 
     ###
     classIndexDict = {
@@ -286,7 +286,7 @@ def main(args, config):
         steps_per_epoch = int(config["model"]["steps_per_epoch"])
         recommend_steps_per_epoch = int(
             min([len(classIndexDict[class_])
-                 for class_ in classes]) / (batch_size / len(classes))) + 1
+                 for class_ in classes]) / (eventsPerClassAndBatch)) + 1
         logger.info(
             "steps_per_epoch: Using {} instead of recommended minimum of {}".
             format(str(steps_per_epoch), str(recommend_steps_per_epoch)))
@@ -310,9 +310,9 @@ def main(args, config):
             for i_era, era in enumerate(eras)
         }
 
-        def balancedBatchGenerator(batch_size):
+        def balancedBatchGenerator(eventsPerClassAndBatch):
             while True:
-                nperClass = int(batch_size / (len(classes) * len(eras)))
+                nperClass = int(eventsPerClassAndBatch / len(eras))
                 selIdxDict = {
                     era: {
                         label: eraIndexDict[era][label][np.random.randint(
@@ -331,7 +331,7 @@ def main(args, config):
                 ])
                 w_collect = np.concatenate([
                     w_train[selIdxDict[era][label]] *
-                    (batch_size / np.sum(w_train[selIdxDict[era][label]]))
+                    (eventsPerClassAndBatch*len(classes) / np.sum(w_train[selIdxDict[era][label]]))
                     for label in classes for era in eras
                 ])
                 yield x_collect, y_collect, w_collect
@@ -366,7 +366,7 @@ def main(args, config):
             x_test, y_test, w_test)
 
         history = model.fit_generator(
-            balancedBatchGenerator(batch_size=batch_size),
+            balancedBatchGenerator(eventsPerClassAndBatch=eventsPerClassAndBatch),
             steps_per_epoch=steps_per_epoch,
             epochs=config["model"]["epochs"],
             callbacks=callbacks,
@@ -380,7 +380,7 @@ def main(args, config):
                             y_train,
                             sample_weight=w_train,
                             validation_data=(x_test, y_test, w_test),
-                            batch_size=batch_size,
+                            batch_size=eventsPerClassAndBatch*len(classes),
                             epochs=config["model"]["epochs"],
                             shuffle=True,
                             callbacks=callbacks)
