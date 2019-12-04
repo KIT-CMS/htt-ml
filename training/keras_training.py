@@ -137,6 +137,9 @@ def main(args, config):
             x_conv = root_numpy.tree2array(tree, branches=variables)
             for i_var, var in enumerate(variables):
                 x_class[:, i_var] = x_conv[var]
+            if np.any(np.isnan(x_class)):
+                logger.fatal("Nan in class {} for era {} in file {} for any of {}".format(class_, era,filename,variables))
+                raise Exception
 
             # One hot encode eras if conditional
             if args.conditional:
