@@ -11,7 +11,7 @@ from array import array
 
 import logging
 logger = logging.getLogger("create_training_dataset")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
 formatter = logging.Formatter("%(name)s - %(levelname)s - %(message)s")
 handler.setFormatter(formatter)
@@ -64,19 +64,22 @@ def main(args, config):
                         logger.fatal("File does not exist: {}".format(friendFileName))
                         raise Exception
                     friendTreeName=os.path.basename(os.path.normpath(friendPath))
+                    logger.debug("Attaching friendtree for {}, filename{}".format(friendTreeName,friendFileName))
                     friendchains[friendTreeName].AddFile(friendFileName)
 
-
+            logger.debug("Joining TChains")
             for friendTreeName in friendchains.keys():
+                logger.debug("Adding to mainchain: {}".format(friendTreeName))
                 chain.AddFriend(friendchains[friendTreeName], friendTreeName)
 
+            logger.debug("Calculationg number of events")
             rdf=ROOT.RDataFrame(chain)
             chain_numentries = rdf.Count().GetValue()
             if chain_numentries == 0:
                 logger.fatal(
                     "Chain (before skimming) does not contain any events.")
                 raise Exception
-            logger.debug("Found {} events for process {}.".format(
+            logger.info("Found {} events for process {}.".format(
                 chain_numentries, process))
 
             # Skim the events with the cut string
@@ -104,7 +107,7 @@ def main(args, config):
             opt = ROOT.ROOT.RDF.RSnapshotOptions()
             opt.fMode = "RECREATE"
             rdf.Snapshot(config["processes"][process]["class"],created_files[-1],".*",opt)
-            logger.debug("snapshot created!")
+            logger.info("snapshot created for process {}!".format(process))
 
         # Combine all skimmed files using `hadd`
         logger.debug("Call `hadd` to combine files of processes for fold {}.".
