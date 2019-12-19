@@ -95,6 +95,13 @@ def main(args, config):
     for v in variables:
         logger.debug("%s", v)
 
+    if args.randomization:
+        signal_classes = ["vbftopo_highmjj", "ggh_1J_PTH0to120", "vbftopo_lowmjj", "ggh_1J_PTH120to200", "qqh_2J", "ggh_0J", "ggh_PTHGT200", "qqh_PTHGT200", "ggh_2J", "ggh", "qqh"]
+        randomization_era = "2016"
+    else:
+        signal_classes = []
+        randomization_era = None
+
     # Load training dataset
     if args.conditional:
         args.balanced_batches = True
@@ -141,9 +148,10 @@ def main(args, config):
                 logger.fatal("Nan in class {} for era {} in file {} for any of {}".format(class_, era,filename,variables))
                 raise Exception
 
-            # One hot encode eras if conditional
+            # One hot encode eras if conditional. Additionally randomize signal class eras if desired.
             if args.conditional:
-                if (class_ == 'ggh' or class_ == 'qqh') and args.randomization:
+                if (class_ in signal_classes) and args.randomization:
+                    logger.debug("Randomizing class {}".format(class_))
                     random_era = np.zeros((tree.GetEntries(), len_eras))
                     for event in random_era:
                         idx = np.random.randint(3, size=1)
@@ -286,7 +294,7 @@ def main(args, config):
         for i_class, label in enumerate(classes)
     }
     if "steps_per_epoch" in config["model"]:
-        steps_per_epoch = int(config["model"]["steps_per_epoch"])
+        steps_per_epoch = int(config["model"]["steps_per_epoch"])*len(eras)
         recommend_steps_per_epoch = int(
             min([len(classIndexDict[class_])
                  for class_ in classes]) / (eventsPerClassAndBatch)) + 1
@@ -315,7 +323,7 @@ def main(args, config):
 
         def balancedBatchGenerator(eventsPerClassAndBatch):
             while True:
-                nperClass = int(eventsPerClassAndBatch / len(eras))
+                nperClass = int(eventsPerClassAndBatch)
                 selIdxDict = {
                     era: {
                         label: eraIndexDict[era][label][np.random.randint(
