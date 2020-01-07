@@ -384,6 +384,7 @@ def main(args, config):
             validation_data=(x_test, y_test, w_test),
             max_queue_size=10,
             workers=5,
+            verbose=2
         )
 
     else:
@@ -394,7 +395,8 @@ def main(args, config):
                             batch_size=eventsPerClassAndBatch*len(classes),
                             epochs=config["model"]["epochs"],
                             shuffle=True,
-                            callbacks=callbacks)
+                            callbacks=callbacks,
+                            verbose=2)
 
     # Plot loss
     epochs = range(1, len(history.history["loss"]) + 1)
