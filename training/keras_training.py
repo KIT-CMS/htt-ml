@@ -91,12 +91,13 @@ def main(args, config):
 
     # Extract list of variables
     variables = config["variables"]
+    classes = config["classes"]
     logger.debug("Use variables:")
     for v in variables:
         logger.debug("%s", v)
 
     if args.randomization:
-        signal_classes = ["vbftopo_highmjj", "ggh_1J_PTH0to120", "vbftopo_lowmjj", "ggh_1J_PTH120to200", "qqh_2J", "ggh_0J", "ggh_PTHGT200", "qqh_PTHGT200", "ggh_2J", "ggh", "qqh"]
+        signal_classes = [class_ for class_ in classes if class_.startswith(('ggh', 'qqh', 'vbftopo'))]
         randomization_era = "2016"
     else:
         signal_classes = []
@@ -114,7 +115,6 @@ def main(args, config):
     y = []  # Target classes
     w = []  # Weights for training
     z = []  # Era information for batching
-    classes = config["classes"]
     for i_era, era in enumerate(eras):
         if args.conditional:
             filename = config["datasets_{}".format(era)][args.fold]
