@@ -91,9 +91,17 @@ def main(args, config):
 
     # Extract list of variables
     variables = config["variables"]
+    classes = config["classes"]
     logger.debug("Use variables:")
     for v in variables:
         logger.debug("%s", v)
+
+    if args.randomization:
+        signal_classes = [class_ for class_ in classes if class_.startswith(('ggh', 'qqh', 'vbftopo'))]
+        randomization_era = "2016"
+    else:
+        signal_classes = []
+        randomization_era = None
 
     # Load training dataset
     if args.conditional:
@@ -107,7 +115,6 @@ def main(args, config):
     y = []  # Target classes
     w = []  # Weights for training
     z = []  # Era information for batching
-    classes = config["classes"]
     for i_era, era in enumerate(eras):
         if args.conditional:
             filename = config["datasets_{}".format(era)][args.fold]
@@ -141,9 +148,10 @@ def main(args, config):
                 logger.fatal("Nan in class {} for era {} in file {} for any of {}".format(class_, era,filename,variables))
                 raise Exception
 
-            # One hot encode eras if conditional
+            # One hot encode eras if conditional. Additionally randomize signal class eras if desired.
             if args.conditional:
-                if (class_ == 'ggh' or class_ == 'qqh') and args.randomization:
+                if (class_ in signal_classes) and args.randomization:
+                    logger.debug("Randomizing class {}".format(class_))
                     random_era = np.zeros((tree.GetEntries(), len_eras))
                     for event in random_era:
                         idx = np.random.randint(3, size=1)
@@ -286,7 +294,7 @@ def main(args, config):
         for i_class, label in enumerate(classes)
     }
     if "steps_per_epoch" in config["model"]:
-        steps_per_epoch = int(config["model"]["steps_per_epoch"])
+        steps_per_epoch = int(config["model"]["steps_per_epoch"])*len(eras)
         recommend_steps_per_epoch = int(
             min([len(classIndexDict[class_])
                  for class_ in classes]) / (eventsPerClassAndBatch)) + 1
@@ -315,7 +323,7 @@ def main(args, config):
 
         def balancedBatchGenerator(eventsPerClassAndBatch):
             while True:
-                nperClass = int(eventsPerClassAndBatch / len(eras))
+                nperClass = int(eventsPerClassAndBatch)
                 selIdxDict = {
                     era: {
                         label: eraIndexDict[era][label][np.random.randint(
@@ -376,6 +384,7 @@ def main(args, config):
             validation_data=(x_test, y_test, w_test),
             max_queue_size=10,
             workers=5,
+            verbose=2
         )
 
     else:
@@ -386,7 +395,8 @@ def main(args, config):
                             batch_size=eventsPerClassAndBatch*len(classes),
                             epochs=config["model"]["epochs"],
                             shuffle=True,
-                            callbacks=callbacks)
+                            callbacks=callbacks,
+                            verbose=2)
 
     # Plot loss
     epochs = range(1, len(history.history["loss"]) + 1)
