@@ -350,11 +350,11 @@ def main(args, config):
             }
 
             y_collect = np.concatenate([
-                y_train[testIndexDict[era][label]] for label in classes
+                y_test[testIndexDict[era][label]] for label in classes
                 for era in eras
             ])
             x_collect = np.concatenate([
-                x_train[testIndexDict[era][label], :] for label in classes
+                x_test[testIndexDict[era][label], :] for label in classes
                 for era in eras
             ])
             w_collect = np.concatenate([
