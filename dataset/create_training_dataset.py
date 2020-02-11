@@ -53,14 +53,14 @@ def main(args, config):
             #for each file, add ntuple TTree to the chain and do the same for the the friendTrees
             for filename in config["processes"][process]["files"]:
                 path = os.path.join(config["base_path"], filename)
-                if not os.path.exists(path):
+                if not os.path.isfile(path):
                     logger.fatal("File does not exist: {}".format(path))
                     raise Exception
                 chain.AddFile(path)
                 # Make sure, that friend files are put in the same order together
                 for friendPath in config["friend_paths"]:
                     friendFileName = os.path.join(friendPath,filename)
-                    if not os.path.exists(friendFileName):
+                    if not os.path.isfile(friendFileName):
                         logger.fatal("File does not exist: {}".format(friendFileName))
                         raise Exception
                     friendTreeName=os.path.basename(os.path.normpath(friendPath))
