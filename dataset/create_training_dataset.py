@@ -138,7 +138,7 @@ def main(args, config):
             config["output_path"],
             "fold{}_{}".format(num_fold, config["output_filename"]),
         )
-        subprocess.call(["hadd", "-f", output_file] + created_files)
+        subprocess.call(["hadd", "-f", output_file] + foldfile)
         logger.info("Created output file: {}".format(output_file))
 
 
