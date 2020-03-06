@@ -175,6 +175,9 @@ def main(args, config):
             else:
                 w_class[:, 0] = w_conv[
                     config["event_weights"]] * config["class_weights"][class_]
+            if np.any(np.isnan(w_class)):
+                logger.fatal("Nan in weight class {} for era {} in file {}.".format(class_, era,filename))
+                raise Exception
             w_era.append(w_class)
 
             # Get targets for this class
