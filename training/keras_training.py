@@ -347,7 +347,7 @@ def main(args, config):
                 ])
                 w_collect = np.concatenate([
                     w_train[selIdxDict[era][label]] *
-                    (eventsPerClassAndBatch*len(classes) / np.sum(w_train[selIdxDict[era][label]]))
+                    (eventsPerClassAndBatch / np.sum(w_train[selIdxDict[era][label]]))
                     for label in classes for era in eras
                 ])
                 yield x_collect, y_collect, w_collect
