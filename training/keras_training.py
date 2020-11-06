@@ -268,6 +268,7 @@ def main(args, config):
     path_model = os.path.join(config["output_path"],
                               "fold{}_keras_model.h5".format(args.fold))
     if os.path.exists(path_model):
+        print "Path {} already exists! I will not overwrite it".format(path_model)
         raise Exception
     if "save_best_only" in config["model"]:
         if config["model"]["save_best_only"]:
