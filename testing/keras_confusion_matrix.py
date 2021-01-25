@@ -17,7 +17,7 @@ mpl.use('Agg')
 mpl.rcParams['font.size'] = 16
 import matplotlib.pyplot as plt
 
-from keras.models import load_model
+from tensorflow.keras.models import load_model
 
 import logging
 
@@ -40,7 +40,7 @@ def parse_arguments():
 
 def parse_config(filename):
     logger.debug("Load config %s.", filename)
-    return yaml.load(open(filename, "r"))
+    return yaml.load(open(filename, "r"), Loader=yaml.SafeLoader)
 
 
 def get_efficiency_representations(m):
@@ -113,8 +113,8 @@ def main(args, config_test, config_train):
     path = os.path.join(config_train["output_path"],
                         config_test["preprocessing"][args.fold])
     logger.info("Load preprocessing %s.", path)
-    preprocessing = pickle.load(open(path, "rb"))
-
+    preprocessing = pickle.load(open(path, "rb"), encoding="bytes")
+    #preprocessing = pickle.load(open(path, "rb"))
     path = os.path.join(config_train["output_path"],
                         config_test["model"][args.fold])
     logger.info("Load keras model %s.", path)
@@ -154,7 +154,6 @@ def main(args, config_test, config_train):
                 logger.fatal("Variable {} has unknown type {}.".format(variable, typename))
                 raise Exception
             tree.SetBranchAddress(variable, values[-1])
-
         if tree.GetLeaf(config_test["weight_branch"]).GetTypeName() != "Float_t":
             logger.fatal(
                 "Weight branch has unkown type: {}".format(tree.GetLeaf(config_test["weight_branch"]).GetTypeName()))

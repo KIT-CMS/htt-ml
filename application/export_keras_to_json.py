@@ -4,7 +4,7 @@ import yaml
 import json
 import copy
 
-from keras.models import load_model
+from tensorflow.keras.models import load_model
 
 import logging
 logger = logging.getLogger("Export keras to json")
@@ -24,7 +24,7 @@ def parse_arguments():
 
 
 def parse_config(filename):
-    return yaml.load(open(filename, "r"))
+    return yaml.load(open(filename, "r"), Loader=yaml.SafeLoader)
 
 
 def main(args, config_training, config_application):
@@ -58,7 +58,7 @@ def main(args, config_training, config_application):
             f.close()
         # export scale & offsets vor variables
         variables = copy.deepcopy(variables_template)
-        scaler = pickle.load(open(p, "rb"))
+        scaler = pickle.load(open(p, "rb"), encoding="bytes")
         for variable,offset,scale in zip(variables["inputs"],scaler.mean_,scaler.scale_): # NOTE: offsets & scales are in the same order as in config_training["variables"]
             variable["offset"] = -offset
             variable["scale"] = 1.0/scale

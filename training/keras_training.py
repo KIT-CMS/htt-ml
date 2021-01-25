@@ -42,7 +42,7 @@ def parse_arguments():
 
 def parse_config(filename):
     logger.debug("Parse config.")
-    return yaml.load(open(filename, "r"), Loader=yaml.Loader)
+    return yaml.load(open(filename, "r"), Loader=yaml.SafeLoader)
 
 
 def setup_logging(level, output_file=None):
@@ -60,7 +60,9 @@ def setup_logging(level, output_file=None):
 
 
 def main(args, config):
+    print ("Test4")
     logger.info(args)
+    print ("Test5")
     # Set seed and import packages
     # NOTE: This need to be done before any keras module is imported!
     logger.debug("Import packages and set random seed to %s.",
@@ -79,15 +81,20 @@ def main(args, config):
 
     import tensorflow as tf
     logger.debug(tf.__file__)
-    tf.set_random_seed(int(config["seed"]))
-    from keras.backend.tensorflow_backend import set_session
-    tfconfig = tf.ConfigProto()
+    if tf.test.gpu_device_name():
+      print ("Default GPU Devices: {}".format(tf.test.gpu_device_name()))
+    else:
+      print ("No GPU found. Using CPU.")
+    tf.compat.v1.set_random_seed(int(config["seed"]))
+    from tensorflow.compat.v1.keras.backend import set_session
+    #from keras.backend.tensorflow_backend import set_session
+    tfconfig = tf.compat.v1.ConfigProto()
     tfconfig.gpu_options.allow_growth = True
-    set_session(tf.Session(config=tfconfig))
+    set_session(tf.compat.v1.Session(config=tfconfig))
 
     from sklearn import preprocessing, model_selection
     import keras_models
-    from keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint
+    from tensorflow.keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint
 
     # Extract list of variables
     variables = config["variables"]
@@ -268,7 +275,7 @@ def main(args, config):
     path_model = os.path.join(config["output_path"],
                               "fold{}_keras_model.h5".format(args.fold))
     if os.path.exists(path_model):
-        print "Path {} already exists! I will not overwrite it".format(path_model)
+        print ("Path {} already exists! I will not overwrite it".format(path_model))
         raise Exception
     if "save_best_only" in config["model"]:
         if config["model"]["save_best_only"]:
@@ -326,33 +333,38 @@ def main(args, config):
             }
             for i_era, era in enumerate(eras)
         }
-
-        def balancedBatchGenerator(eventsPerClassAndBatch):
-            while True:
-                nperClass = int(eventsPerClassAndBatch)
-                selIdxDict = {
-                    era: {
-                        label: eraIndexDict[era][label][np.random.randint(
-                            0, len(eraIndexDict[era][label]), nperClass)]
-                        for label in classes
+        import threading
+        class balancedBatchGenerator:
+            def __init__(self, eventsPerClassAndBatch):
+                self.eventsPerClassAndBatch = eventsPerClassAndBatch
+                self.lock = threading.Lock()
+            def __iter__(self):
+                return self
+            def __next__(self):
+                with self.lock:
+                    nperClass = int(eventsPerClassAndBatch)
+                    selIdxDict = {
+                        era: {
+                            label: eraIndexDict[era][label][np.random.randint(
+                                0, len(eraIndexDict[era][label]), nperClass)]
+                            for label in classes
+                        }
+                        for era in eras
                     }
-                    for era in eras
-                }
-                y_collect = np.concatenate([
-                    y_train[selIdxDict[era][label]] for label in classes
-                    for era in eras
-                ])
-                x_collect = np.concatenate([
-                    x_train[selIdxDict[era][label], :] for label in classes
-                    for era in eras
-                ])
-                w_collect = np.concatenate([
-                    w_train[selIdxDict[era][label]] *
-                    (eventsPerClassAndBatch / np.sum(w_train[selIdxDict[era][label]]))
-                    for label in classes for era in eras
-                ])
-                yield x_collect, y_collect, w_collect
-
+                    y_collect = np.concatenate([
+                        y_train[selIdxDict[era][label]] for label in classes
+                        for era in eras
+                    ])
+                    x_collect = np.concatenate([
+                        x_train[selIdxDict[era][label], :] for label in classes
+                        for era in eras
+                    ])
+                    w_collect = np.concatenate([
+                        w_train[selIdxDict[era][label]] *
+                        (eventsPerClassAndBatch / np.sum(w_train[selIdxDict[era][label]]))
+                        for label in classes for era in eras
+                    ])
+                    return x_collect, y_collect, w_collect
         def calculateValidationWeights(x_test, y_test, w_test):
             testIndexDict = {
                 era: {
@@ -381,8 +393,9 @@ def main(args, config):
 
         x_test, y_test, w_test = calculateValidationWeights(
             x_test, y_test, w_test)
-
-        history = model.fit_generator(
+        from datetime import datetime
+        print("Timestamp training start: {}".format(datetime.now().strftime("%H:%M:%S")))
+        history = model.fit(
             balancedBatchGenerator(eventsPerClassAndBatch=eventsPerClassAndBatch),
             steps_per_epoch=steps_per_epoch,
             epochs=config["model"]["epochs"],
@@ -394,6 +407,8 @@ def main(args, config):
         )
 
     else:
+        from datetime import datetime
+        print("Timestamp train start: {}".format(datetime.now().strftime("%H:%M:%S")))
         history = model.fit(x_train,
                             y_train,
                             sample_weight=w_train,
@@ -425,8 +440,11 @@ def main(args, config):
 
 
 if __name__ == "__main__":
+    print ("Test1")
     args = parse_arguments()
+    print ("Test2")
     config = parse_config(args.config)
-    setup_logging(logging.DEBUG,
+    setup_logging(logging.INFO,
                   "{}/training{}.log".format(config["output_path"], args.fold))
+    print ("Test3")
     main(args, config)

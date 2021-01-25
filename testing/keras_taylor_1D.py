@@ -17,7 +17,7 @@ mpl.rcParams['font.size'] = 16
 import matplotlib.pyplot as plt
 from matplotlib import cm
 
-from keras.models import load_model
+from tensorflow.keras.models import load_model
 import tensorflow as tf
 
 from tensorflow_derivative.inputs import Inputs
@@ -54,7 +54,7 @@ def parse_arguments():
 
 def parse_config(filename):
     logger.debug("Load config %s.", filename)
-    return yaml.load(open(filename, "r"))
+    return yaml.load(open(filename, "r"), Loader=yaml.SafeLoader)
 
 
 def main(args, config_test, config_train):
@@ -62,8 +62,8 @@ def main(args, config_test, config_train):
     path = os.path.join(config_train["output_path"],
                         config_test["preprocessing"][args.fold])
     logger.info("Load preprocessing %s.", path)
-    preprocessing = pickle.load(open(path, "rb"))
-
+    preprocessing = pickle.load(open(path, "rb"), encoding="bytes")
+    #preprocessing = pickle.load(open(path, "rb"))  
     # Load Keras model
     path = os.path.join(config_train["output_path"],
                         config_test["model"][args.fold])
@@ -100,8 +100,8 @@ def main(args, config_test, config_train):
     model_tensorflow = model_tensorflow_impl(inputs.placeholders, model_keras)
     outputs = Outputs(model_tensorflow, config_train["classes"])
 
-    sess = tf.Session()
-    sess.run(tf.global_variables_initializer())
+    sess = tf.compat.v1.Session()
+    sess.run(tf.compat.v1.global_variables_initializer())
 
     # Get operations for first-order derivatives
     deriv_ops = {}

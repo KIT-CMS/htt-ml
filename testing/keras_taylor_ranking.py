@@ -65,7 +65,7 @@ def main(args, config_test, config_train):
     path = os.path.join(config_train["output_path"],
                         config_test["preprocessing"][args.fold])
     logger.info("Load preprocessing %s.", path)
-    preprocessing = pickle.load(open(path, "rb"))
+    preprocessing = pickle.load(open(path, "rb"), encoding="bytes")
 
     classes = config_train["classes"]
     variables = config_train["variables"]

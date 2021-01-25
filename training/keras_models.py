@@ -1,7 +1,8 @@
-from keras.models import Sequential, load_model
-from keras.layers import *
-from keras.optimizers import *
-from keras.regularizers import l2
+import tensorflow as tf
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import *
+from tensorflow.keras.optimizers import *
+from tensorflow.keras.regularizers import l2
 import numpy as np
 
 
@@ -170,13 +171,12 @@ def smhtt_dropout_tanh_tensorflow(input_placeholder, keras_model):
             print("    weight, shape: {}, {}".format(weight.name,
                                                      np.array(array).shape))
             weights[weight.name] = np.array(array)
-
-    w1 = tf.get_variable('w1', initializer=weights['dense_1/kernel:0'])
-    b1 = tf.get_variable('b1', initializer=weights['dense_1/bias:0'])
-    w2 = tf.get_variable('w2', initializer=weights['dense_2/kernel:0'])
-    b2 = tf.get_variable('b2', initializer=weights['dense_2/bias:0'])
-    w3 = tf.get_variable('w3', initializer=weights['dense_3/kernel:0'])
-    b3 = tf.get_variable('b3', initializer=weights['dense_3/bias:0'])
+    w1 = tf.compat.v1.get_variable('w1', initializer=weights['dense/kernel:0'])
+    b1 = tf.compat.v1.get_variable('b1', initializer=weights['dense/bias:0'])
+    w2 = tf.compat.v1.get_variable('w2', initializer=weights['dense_1/kernel:0'])
+    b2 = tf.compat.v1.get_variable('b2', initializer=weights['dense_1/bias:0'])
+    w3 = tf.compat.v1.get_variable('w3', initializer=weights['dense_2/kernel:0'])
+    b3 = tf.compat.v1.get_variable('b3', initializer=weights['dense_2/bias:0'])
 
     l1 = tf.tanh(tf.add(b1, tf.matmul(input_placeholder, w1)))
     l2 = tf.tanh(tf.add(b2, tf.matmul(l1, w2)))
