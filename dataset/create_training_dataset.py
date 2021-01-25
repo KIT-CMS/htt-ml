@@ -30,11 +30,12 @@ def parse_arguments():
 
 def parse_config(filename):
     logger.debug("Load YAML config: {}".format(filename))
-    return yaml.load(open(filename, "r"))
+    return yaml.load(open(filename, "r"), Loader=yaml.SafeLoader)
 
 
 def generateRootFiles(jobconfig):
     process, num_fold, config = jobconfig
+    logger.info(process)
     logger.debug("Collect events of process {} for fold {}.".format(process, num_fold))
 
     # Create output file
@@ -116,7 +117,8 @@ def generateRootFiles(jobconfig):
 
     opt = ROOT.ROOT.RDF.RSnapshotOptions()
     opt.fMode = "RECREATE"
-    rdf.Snapshot(config["processes"][process]["class"], output_filename, ".*", opt)
+
+    rdf.Snapshot(config["processes"][process]["class"], output_filename, "^((?!nickname).)*$", opt)
     logger.info("snapshot created for process {}!".format(process))
     return (num_fold, output_filename)
 

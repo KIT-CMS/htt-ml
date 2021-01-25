@@ -60,9 +60,7 @@ def setup_logging(level, output_file=None):
 
 
 def main(args, config):
-    print ("Test4")
     logger.info(args)
-    print ("Test5")
     # Set seed and import packages
     # NOTE: This need to be done before any keras module is imported!
     logger.debug("Import packages and set random seed to %s.",
@@ -408,7 +406,7 @@ def main(args, config):
 
     else:
         from datetime import datetime
-        print("Timestamp train start: {}".format(datetime.now().strftime("%H:%M:%S")))
+        print("Timestamp training start: {}".format(datetime.now().strftime("%H:%M:%S")))
         history = model.fit(x_train,
                             y_train,
                             sample_weight=w_train,
@@ -440,11 +438,8 @@ def main(args, config):
 
 
 if __name__ == "__main__":
-    print ("Test1")
     args = parse_arguments()
-    print ("Test2")
     config = parse_config(args.config)
     setup_logging(logging.INFO,
                   "{}/training{}.log".format(config["output_path"], args.fold))
-    print ("Test3")
     main(args, config)
