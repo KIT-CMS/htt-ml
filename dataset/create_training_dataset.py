@@ -77,6 +77,8 @@ def generateRootFiles(jobconfig):
         chain.AddFriend(friendchains[friendTreeName], friendTreeName)
 
     logger.debug("Calculationg number of events")
+    # Disable branch "nickname" of type "string" to prevent futile searching
+    chain.SetBranchStatus("nickname",0)
     rdf = ROOT.RDataFrame(chain)
     chain_numentries = rdf.Count().GetValue()
     if chain_numentries == 0:
