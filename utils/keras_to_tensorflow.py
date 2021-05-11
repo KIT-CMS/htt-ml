@@ -1,6 +1,5 @@
 import tensorflow as tf
-from keras.models import load_model
-from keras import backend as K
+from tensorflow.keras.models import load_model
 
 from tensorflow_derivative.outputs import Outputs
 
@@ -33,7 +32,7 @@ def convert_to_pb(weight_file,input_fld='',output_fld=''):
     # if osp.exists(osp.join(output_fld, output_graph_name)):
     #     return model, osp.join(output_fld, output_graph_name), input_node_name
     # else:
-    sess = K.get_session()
+    sess = tf.compat.v1.keras.backend.get_session()
 
     constant_graph = graph_util.convert_variables_to_constants(sess,
                                                                sess.graph.as_graph_def(),
@@ -50,8 +49,8 @@ def convert_to_pb(weight_file,input_fld='',output_fld=''):
 def load_graph(frozen_graph_filename, input_node_name):
     # We load the protobuf file from the disk and parse it to retrieve the
     # unserialized graph_def
-    with tf.gfile.GFile(frozen_graph_filename, "rb") as f:
-        graph_def = tf.GraphDef()
+    with tf.io.gfile.GFile(frozen_graph_filename, "rb") as f:
+        graph_def = tf.compat.v1.GraphDef()
         graph_def.ParseFromString(f.read())
 
     with tf.Graph().as_default() as graph:

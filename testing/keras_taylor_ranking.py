@@ -11,6 +11,7 @@ import numpy as np
 import os
 import time
 import sys
+from datetime import datetime
 
 import matplotlib as mpl
 mpl.use('Agg')
@@ -20,8 +21,10 @@ import matplotlib.pyplot as plt
 sys.path.append('htt-ml/utils')
 
 import tensorflow as tf
+from tensorflow.keras.models import load_model
+import pandas as pd
+from pandas.api.types import CategoricalDtype 
 
-from keras_to_tensorflow import get_tensorflow_model
 
 import logging
 logger = logging.getLogger("keras_taylor_ranking")
@@ -48,19 +51,10 @@ def parse_arguments():
 
 def parse_config(filename):
     logger.debug("Load config %s.", filename)
-    return yaml.load(open(filename, "r"))
-
-class derivative_operation(object):
-    def __init__(self, outputs, input, class_name):
-        self.derivative = outputs.outputs_dict[class_name]
-
-        self.first_order_gradients = tf.gradients(self.derivative, input)[0][0]
-        self.first_order_gradients = tf.unstack(self.first_order_gradients)
-        self.second_order_gradient = [tf.gradients(first_order_gradient, input) for first_order_gradient in self.first_order_gradients]
-
-
+    return yaml.load(open(filename, "r"), Loader=yaml.SafeLoader)
 
 def main(args, config_test, config_train):
+    logger.info("Tensorflow version: {}".format(tf.__version__))
     # Load preprocessing
     path = os.path.join(config_train["output_path"],
                         config_test["preprocessing"][args.fold])
@@ -77,17 +71,11 @@ def main(args, config_test, config_train):
     else:
         eras = []
         path = os.path.join(config_train["datasets"][(1, 0)[args.fold]])
-
-
-    model_keras, tensorflow_model, outputs, tf_input, tf_output, dropout_name = get_tensorflow_model(args,
-                                                                                                     config_train,
-                                                                                                     config_test)
-    if dropout_name:
-        dropout = tensorflow_model.get_tensor_by_name(dropout_name)
-    input = tensorflow_model.get_tensor_by_name(tf_input)
-    output = tensorflow_model.get_tensor_by_name(tf_output)
-
-    sess = tf.Session(graph=tensorflow_model)
+    
+    path_model = os.path.join(config_train["output_path"],
+                        config_test["model"][args.fold])
+    logger.info("Load keras model %s.", path_model)
+    model_keras = load_model(path_model)
 
     #Get names for first-order and second-order derivatives
     logger.debug("Set up derivative names.")
@@ -100,12 +88,53 @@ def main(args, config_test, config_train):
                 continue
             deriv_ops_names.append([i_var, j_var])
 
+    # Function to compute gradients of model answers in optimized graph mode    
+    @tf.function
+    def get_gradients(model, samples, output_ind):
+        # Define function to get single gradient
+        def get_single_gradient(single_sample):
+            # (Expand shape of sample for gradient function)
+            single_sample = tf.expand_dims(single_sample, axis=0)
+            with tf.GradientTape() as tape:
+                tape.watch(single_sample)
+                # Get response from model with (only choosen output class)
+                response = model(single_sample, training=False)[:, output_ind]
+            # Get gradient of choosen output class wrt. input sample
+            grad = tape.gradient(response, single_sample)
+            return grad
+        # Apply function to every sample to get all gradients
+        grads = tf.vectorized_map(get_single_gradient, sample_tensor)
+        return grads
+
+    # Function to compute hessian of model answers in optimized graph mode   
+    # @tf.function
+    def get_hessians(model, sample, output_ind):
+        # Define function to get single hessian
+        def get_single_hessian(single_sample):
+            single_sample = tf.expand_dims(single_sample, axis=0)
+            #Function to compute gradient of a vector in regard to inputs (on outer tape)
+            def tot_gradient(vector):
+                return tape.gradient(vector, single_sample)
+            with tf.GradientTape(persistent=True) as tape:
+                tape.watch(single_sample)
+                with tf.GradientTape(persistent=True) as tape_of_tape:
+                    tape_of_tape.watch(single_sample)
+                    # Get response from model with (only choosen output class)
+                    response = model(single_sample, training=False)[:, output_ind]
+                # Get gradient of choosen output class wrt. input sample
+                grads = tape_of_tape.gradient(response, single_sample)
+                # Compute hessian of model from gradients of model wrt. input sample
+                hessian = tf.map_fn(tot_gradient, grads[0])
+            return hessian
+        # Apply function to every sample to get all hessians
+        hessians = tf.vectorized_map(get_single_hessian, sample_tensor)
+        return hessians
+
     # Loop over testing dataset
     logger.info("Loop over test dataset %s to get model response.", path)
     file_ = ROOT.TFile(path)
     deriv_class = {}
     weights = {}
-    deriv_ops = {}
 
     for i_class, class_ in enumerate(classes):
         logger.debug("Process class %s.", class_)
@@ -115,11 +144,9 @@ def main(args, config_test, config_train):
             logger.fatal("Tree %s does not exist.", class_)
             raise Exception
 
-        deriv_ops[class_] = derivative_operation(outputs=outputs, input=input, class_name=class_)
-
-    time_start = time.time()
 
     for i_class, class_ in enumerate(classes):
+        logger.debug("Current time: {}".format(datetime.now().strftime("%H:%M:%S")))
         logger.debug("Process class %s.", class_)
 
         tree = file_.Get(class_)
@@ -130,104 +157,66 @@ def main(args, config_test, config_train):
         for friend in friend_trees_names:
             tree.AddFriend(friend)
 
-        values = []
         for variable in variables:
             typename = tree.GetLeaf(variable).GetTypeName()
-            if typename == "Float_t":
-                values.append(array("f", [-999]))
-            elif typename == "Int_t":
-                values.append(array("i", [-999]))
-            else:
-                logger.fatal("Variable {} has unknown type {}.".format(
-                    variable, typename))
+            if not (typename == "Float_t" or typename == "Int_t"):
+                logger.fatal("Variable {} has unknown type {}.".format(variable, typename))
                 raise Exception
-            tree.SetBranchAddress(variable, values[-1])
-
         if tree.GetLeaf(variable).GetTypeName() != "Float_t":
-            logger.fatal("Weight branch has unkown type.")
+            logger.fatal(
+                "Weight branch has unkown type: {}".format(tree.GetLeaf(config_test["weight_branch"]).GetTypeName()))
             raise Exception
-        weight = array("f", [-999])
-        tree.SetBranchAddress(config_test["weight_branch"], weight)
 
         length_variables = len(variables) + len(eras)
         length_deriv_class = (length_variables**2 + length_variables)/2 + length_variables
 
-        deriv_class[class_] = np.zeros((tree.GetEntries(),
-                                       length_deriv_class))
-        weights[class_] = np.zeros((tree.GetEntries()))
+        # Function to get upper triangle of matrix for every matrix in array
+        def triu_map(matrix_array, size):
+            # get upper triangle indices for given matrix size
+            triu = np.triu_indices(size)
+            # Function to apply indices to single element of matrix array and get single output 
+            def single_triu(single_mat):
+                return single_mat[triu]
+            # Apply function to every element
+            return np.array(list(map(single_triu, matrix_array)))
 
-        for i_event in range(tree.GetEntries()):
-            tree.GetEntry(i_event)
-
-            # Preprocessing
-            values_stacked = np.hstack(values).reshape(1, len(values))
-            values_preprocessed = preprocessing.transform(values_stacked)
-            if args.era:
-                if str(args.era) == "2016":
-                    values_preprocessed = np.expand_dims(np.concatenate((np.squeeze(values_preprocessed), [1, 0, 0])),
-                                                         axis=0)
-                elif str(args.era) == "2017":
-                    values_preprocessed = np.expand_dims(np.concatenate((np.squeeze(values_preprocessed), [0, 1, 0])),
-                                                         axis=0)
-                elif str(args.era) == "2018":
-                    values_preprocessed = np.expand_dims(np.concatenate((np.squeeze(values_preprocessed), [0, 0, 1])),
-                                                         axis=0)
-                else:
-                    logger.error('Era not found, exiting.')
-
-            # Keras inference
-            response = model_keras.predict(values_preprocessed)
-            response_keras = np.squeeze(response)
-
-            deriv_op = deriv_ops[class_]
-
-            if dropout_name:
-                feed_dict = {
-                    input: values_preprocessed,
-                    dropout: False
-                }
-            else:
-                feed_dict = {
-                    input: values_preprocessed
-                }
-
-            # Tensorflow inference
-            response = sess.run(
-                output,
-                feed_dict=feed_dict)
-            response_tensorflow = np.squeeze(response)
-
-            # Check compatibility
-            mean_error = np.mean(np.abs(response_keras - response_tensorflow))
-
-            if mean_error > 1e-5:
-                logger.fatal(
-                    "Found mean error of {} between Keras and TensorFlow output for event {}.".
-                        format(mean_error, i_event))
-                raise Exception
-
-            first_order_values = sess.run(deriv_op.first_order_gradients, feed_dict=feed_dict)
-
-            second_order_values = sess.run(deriv_op.second_order_gradient, feed_dict=feed_dict)
-
-            second_order_stacked = np.stack(np.squeeze(second_order_values))
-            lower_hessian_half = second_order_stacked[np.triu_indices(length_variables)]
-            deriv_values = np.concatenate((np.squeeze(first_order_values), lower_hessian_half))
-
-            deriv_values = np.squeeze(deriv_values)
-            deriv_class[class_][i_event, :] = deriv_values
-
-            # Store weight
-            weights[class_][i_event] = weight[0]
-
-            if i_event % 10000 == 0:
-                time_between = time.time()
-                logger.info('Processing event {}'.format(i_event))
-                logger.info('Current time: {} min'.format((time_between-time_start)/60.))
-
-    time_end = time.time()
-    logger.info('Elapsed time: {} min'.format((time_end - time_start)/60.))
-
+        # Convert tree to numpy array and labels for variable columns and weight column
+        tdata, tcolumns = tree.AsMatrix(return_labels=True ,columns=variables)
+        wdata, wcolumns = tree.AsMatrix(return_labels=True ,columns=[config_test["weight_branch"]])
+        # Convert numpy array and labels to pandas dataframe for variable columns
+        pdata = pd.DataFrame(data=tdata, columns=tcolumns)
+        # Flatten weight column into 1d array
+        flat_weight = wdata.flatten()
+        # Apply preprocessing of training to variables
+        values_preprocessed = pd.DataFrame(data=preprocessing.transform(pdata), columns=tcolumns)
+        # Check for viable era
+        if not args.era in [2016, 2017, 2018]:
+            logger.fatal("Era must be 2016, 2017 or 2018 but is {}".format(args.era))
+            raise Exception
+        # Append one hot encoded era information to variables
+        # Append as int
+        values_preprocessed["era"] = args.era
+        # Expand to possible values (necessary for next step)
+        values_preprocessed["era"] = values_preprocessed["era"].astype(CategoricalDtype([2016, 2017, 2018]))
+        # Convert to one hot encoding and append
+        values_preprocessed = pd.concat([values_preprocessed, pd.get_dummies(values_preprocessed["era"], prefix="era")], axis=1)
+        # Remove int era column
+        values_preprocessed.drop(["era"], axis=1, inplace=True)
+        ###
+        # Transform numpy array with samples to tensorflow tensor
+        sample_tensor = tf.convert_to_tensor(values_preprocessed)
+        # Get array of gradients of model wrt. samples 
+        gradients = tf.squeeze(get_gradients(model_keras, sample_tensor, i_class))
+        # Get array of hessians of model wrt. samples 
+        hessians = tf.squeeze(get_hessians(model_keras, sample_tensor, i_class))
+        # Get array of upper triangles of hessians of model wrt. samples 
+        upper_hessian_half = triu_map(hessians.numpy(), length_variables)
+        # Append gradient values to hessian values
+        deriv_values = np.concatenate((gradients, upper_hessian_half), axis=1)
+        # Collect results for class
+        deriv_class[class_] = deriv_values
+        weights[class_] = flat_weight
+        
     # Calculate taylor coefficients
     mean_abs_deriv = {}
     for class_ in classes:
@@ -264,8 +253,8 @@ def main(args, config_test, config_train):
             else:
                 ranking_tmp.append(value)
 
-        yx = zip(ranking_tmp, labels_tmp)
-        yx.sort(reverse=True)
+        yx = list(zip(ranking_tmp, labels_tmp))
+        yx = sorted(yx, reverse=True)
         labels_tmp = [x for y, x in yx]
         ranking_tmp = [y for y, x in yx]
 
@@ -283,8 +272,8 @@ def main(args, config_test, config_train):
             labels_tmp.append(", ".join(names))
             ranking_tmp.append(value)
 
-        yx = zip(ranking_tmp, labels_tmp)
-        yx.sort(reverse=True)
+        yx = list(zip(ranking_tmp, labels_tmp))
+        yx = sorted(yx, reverse=True)
         labels_tmp = [x for y, x in yx]
         ranking_tmp = [y for y, x in yx]
 

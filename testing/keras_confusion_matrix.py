@@ -10,13 +10,16 @@ import yaml
 import pickle
 import numpy as np
 import os
+from datetime import datetime
 
 import matplotlib as mpl
 
 mpl.use('Agg')
 mpl.rcParams['font.size'] = 16
 import matplotlib.pyplot as plt
-
+import tensorflow as tf
+import pandas as pd
+from pandas.api.types import CategoricalDtype 
 from tensorflow.keras.models import load_model
 
 import logging
@@ -126,6 +129,14 @@ def main(args, config_test, config_train):
     else:
         path = os.path.join(config_train["datasets"][(1, 0)[args.fold]])
         class_weights = config_train["class_weights"]
+
+    # Function to compute model answers in optimized graph mode    
+    @tf.function
+    def get_values(model, samples):
+        sample_tensor = tf.convert_to_tensor(samples)
+        responses = model(sample_tensor, training=False)
+        return responses
+    
     logger.info("Loop over test dataset %s to get model response.", path)
     file_ = ROOT.TFile(path)
     confusion = np.zeros(
@@ -134,8 +145,9 @@ def main(args, config_test, config_train):
     confusion2 = np.zeros(
         (len(config_train["classes"]), len(config_train["classes"])),
         dtype=np.float)
-
-    for i_class, class_ in enumerate(config_train["classes"]):
+    classes = config_train["classes"]
+    for i_class, class_ in enumerate(classes):
+        logger.debug("Current time_start: {}".format(datetime.now().strftime("%H:%M:%S:%f")))
         logger.debug("Process class %s. with weight %s", class_, class_weights[class_])
 
         tree = file_.Get(class_)
@@ -143,46 +155,49 @@ def main(args, config_test, config_train):
             logger.fatal("Tree %s does not exist.", class_)
             raise Exception
 
-        values = []
-        for variable in config_train["variables"]:
+        variables = config_train["variables"]
+        for variable in variables:
             typename = tree.GetLeaf(variable).GetTypeName()
-            if typename == "Float_t":
-                values.append(array("f", [-999]))
-            elif typename == "Int_t":
-                values.append(array("i", [-999]))
-            else:
+            if not (typename == "Float_t" or typename == "Int_t"):
                 logger.fatal("Variable {} has unknown type {}.".format(variable, typename))
                 raise Exception
-            tree.SetBranchAddress(variable, values[-1])
-        if tree.GetLeaf(config_test["weight_branch"]).GetTypeName() != "Float_t":
+        if not tree.GetLeaf(config_test["weight_branch"]).GetTypeName() == "Float_t":
             logger.fatal(
                 "Weight branch has unkown type: {}".format(tree.GetLeaf(config_test["weight_branch"]).GetTypeName()))
             raise Exception
-        weight = array("f", [-999])
-        tree.SetBranchAddress(config_test["weight_branch"], weight)
 
-        for i_event in range(tree.GetEntries()):
-            tree.GetEntry(i_event)
-            values_stacked = np.hstack(values).reshape(1, len(values))
-            values_preprocessed = preprocessing.transform(values_stacked)
-            if args.era:
-                if str(args.era) == "2016":
-                    values_preprocessed = np.expand_dims(np.concatenate((np.squeeze(values_preprocessed), [1, 0, 0])),
-                                                         axis=0)
-                elif str(args.era) == "2017":
-                    values_preprocessed = np.expand_dims(np.concatenate((np.squeeze(values_preprocessed), [0, 1, 0])),
-                                                         axis=0)
-                elif str(args.era) == "2018":
-                    values_preprocessed = np.expand_dims(np.concatenate((np.squeeze(values_preprocessed), [0, 0, 1])),
-                                                         axis=0)
-                else:
-                    raise Exception("Era must be 2016, 2017 or 2018 but is {}".format(args.era))
-            response = model.predict(values_preprocessed)
-            response = np.squeeze(response)
-            max_index = np.argmax(response)
-            confusion[i_class, max_index] += weight[0]
-            confusion2[i_class, max_index] += weight[0] * class_weights[class_]
-
+        # Convert tree to numpy array and labels for variable columns and weight column
+        tdata, tcolumns = tree.AsMatrix(return_labels=True ,columns=variables)
+        wdata, wcolumns = tree.AsMatrix(return_labels=True ,columns=[config_test["weight_branch"]])
+        # Convert numpy array and labels to pandas dataframe for variable columns and weight column
+        pdata = pd.DataFrame(data=tdata, columns=tcolumns)
+        # Flatten weight column into 1d array
+        flat_weight = wdata.flatten()
+        # Apply preprocessing of training to variables
+        values_preprocessed = pd.DataFrame(data=preprocessing.transform(pdata), columns=tcolumns)
+        # Check for viable era
+        if not args.era in [2016, 2017, 2018]:
+            logger.fatal("Era must be 2016, 2017 or 2018 but is {}".format(args.era))
+            raise Exception
+        # Append one hot encoded era information to variables
+        # Append as int
+        values_preprocessed["era"] = args.era
+        # Expand to possible values (necessary for next step)
+        values_preprocessed["era"] = values_preprocessed["era"].astype(CategoricalDtype([2016, 2017, 2018]))
+        # Convert to one hot encoding and append
+        values_preprocessed = pd.concat([values_preprocessed, pd.get_dummies(values_preprocessed["era"], prefix="era")], axis=1)
+        # Remove int era column
+        values_preprocessed.drop(["era"], axis=1, inplace=True)
+        ###
+        # Get interference from trained model
+        event_responses = get_values(model, values_preprocessed)
+        # Determine class for each sample
+        max_indexes = np.argmax(event_responses, axis=1)
+        # Sum over weights of samples for each response
+        for i, indexes in enumerate(classes):
+            confusion[i_class, i] += np.sum(flat_weight[max_indexes==i])
+            confusion2[i_class, i] += np.sum(flat_weight[max_indexes==i]*class_weights[class_])
+    
     # Debug output to ensure that plotting is correct
     for i_class, class_ in enumerate(config_train["classes"]):
         logger.debug("True class: {}".format(class_))

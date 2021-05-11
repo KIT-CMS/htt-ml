@@ -10,6 +10,7 @@ import pickle
 import numpy as np
 import os
 import sys
+from datetime import datetime
 
 import matplotlib as mpl
 mpl.use('Agg')
@@ -19,10 +20,9 @@ from matplotlib import cm
 
 from tensorflow.keras.models import load_model
 import tensorflow as tf
+import pandas as pd
+from pandas.api.types import CategoricalDtype 
 
-from tensorflow_derivative.inputs import Inputs
-from tensorflow_derivative.outputs import Outputs
-from tensorflow_derivative.derivatives import Derivatives
 
 import logging
 logger = logging.getLogger("keras_taylor_1D")
@@ -58,12 +58,13 @@ def parse_config(filename):
 
 
 def main(args, config_test, config_train):
+    logger.info("Tensorflow version: {}".format(tf.__version__))
+
     # Load preprocessing
     path = os.path.join(config_train["output_path"],
                         config_test["preprocessing"][args.fold])
     logger.info("Load preprocessing %s.", path)
     preprocessing = pickle.load(open(path, "rb"), encoding="bytes")
-    #preprocessing = pickle.load(open(path, "rb"))  
     # Load Keras model
     path = os.path.join(config_train["output_path"],
                         config_test["model"][args.fold])
@@ -79,7 +80,6 @@ def main(args, config_test, config_train):
         path = os.path.join(config_train["datasets"][(1, 0)[args.fold]])
 
     # Get TensorFlow graph
-    inputs = Inputs(config_train["variables"] + eras)
 
     try:
         sys.path.append("htt-ml/training")
@@ -87,35 +87,34 @@ def main(args, config_test, config_train):
     except:
         logger.fatal("Failed to import Keras models.")
         raise Exception
-    try:
-        name_keras_model = config_train["model"]["name"]
-        model_tensorflow_impl = getattr(
-            keras_models, config_train["model"]["name"] + "_tensorflow")
-    except:
-        logger.fatal(
-            "Failed to load TensorFlow version of Keras model {}.".format(
-                name_keras_model))
-        raise Exception
+    
+    # Function to compute gradients of model answers in optimized graph mode    
+    @tf.function(experimental_relax_shapes=True)
+    def get_gradients(model, samples, output_ind):
+        # Transform numpy array with samples to tensorflow tensor
+        sample_tensor = tf.convert_to_tensor(samples)
+        # Define function to get single gradient
+        def get_single_gradient(single_sample):
+            # (Expand shape of sample for gradient function)
+            single_sample = tf.expand_dims(single_sample, axis=0)
+            with tf.GradientTape() as tape:
+                tape.watch(single_sample)
+                # Get response from model with (only choosen output class)
+                response = model(single_sample, training=False)[:, output_ind]
+            # Get gradient of choosen output class wrt. input sample
+            grad = tape.gradient(response, single_sample)
+            return grad
+        # Apply function to every sample to get all gradients
+        grads = tf.vectorized_map(get_single_gradient, sample_tensor)
+        return grads
 
-    model_tensorflow = model_tensorflow_impl(inputs.placeholders, model_keras)
-    outputs = Outputs(model_tensorflow, config_train["classes"])
-
-    sess = tf.compat.v1.Session()
-    sess.run(tf.compat.v1.global_variables_initializer())
-
-    # Get operations for first-order derivatives
-    deriv_ops = {}
-    derivatives = Derivatives(inputs, outputs)
-    for class_ in config_train["classes"]:
-        deriv_ops[class_] = []
-        for variable in config_train["variables"] + eras:
-            deriv_ops[class_].append(derivatives.get(class_, [variable]))
 
     # Loop over testing dataset
     logger.info("Loop over test dataset %s to get model response.", path)
     file_ = ROOT.TFile(path)
     mean_abs_deriv = {}
     for i_class, class_ in enumerate(config_train["classes"]):
+        logger.debug("Current time: {}".format(datetime.now().strftime("%H:%M:%S")))
         logger.debug("Process class %s.", class_)
 
         tree = file_.Get(class_)
@@ -126,84 +125,47 @@ def main(args, config_test, config_train):
         for friend in friend_trees_names:
             tree.AddFriend(friend)
 
-        values = []
-        for variable in config_train["variables"]:
+        variables = config_train["variables"]
+        for variable in variables:
             typename = tree.GetLeaf(variable).GetTypeName()
-            if  typename == "Float_t":
-                values.append(array("f", [-999]))
-            elif typename == "Int_t":
-                values.append(array("i", [-999]))
-            else:
+            if not (typename == "Float_t" or typename == "Int_t"):
                 logger.fatal("Variable {} has unknown type {}.".format(variable, typename))
                 raise Exception
-            tree.SetBranchAddress(variable, values[-1])
-
         if tree.GetLeaf(variable).GetTypeName() != "Float_t":
-            logger.fatal("Weight branch has unkown type.")
+            logger.fatal(
+                "Weight branch has unkown type: {}".format(tree.GetLeaf(config_test["weight_branch"]).GetTypeName()))
             raise Exception
-        weight = array("f", [-999])
-        tree.SetBranchAddress(config_test["weight_branch"], weight)
 
-        deriv_class = np.zeros((tree.GetEntries(),
-                                len(config_train["variables"]) + len(eras)))
-        weights = np.zeros((tree.GetEntries()))
-
-        for i_event in range(tree.GetEntries()):
-            tree.GetEntry(i_event)
-
-            # Preprocessing
-            values_stacked = np.hstack(values).reshape(1, len(values))
-            values_preprocessed = preprocessing.transform(values_stacked)
-            if args.era:
-                if str(args.era) == "2016":
-                    values_preprocessed = np.expand_dims(np.concatenate((np.squeeze(values_preprocessed), [1, 0, 0])),
-                                                         axis=0)
-                elif str(args.era) == "2017":
-                    values_preprocessed = np.expand_dims(np.concatenate((np.squeeze(values_preprocessed), [0, 1, 0])),
-                                                         axis=0)
-                elif str(args.era) == "2018":
-                    values_preprocessed = np.expand_dims(np.concatenate((np.squeeze(values_preprocessed), [0, 0, 1])),
-                                                         axis=0)
-                else:
-                    logger.error('Era not found, exiting.')
-
-            # Keras inference
-            response = model_keras.predict(values_preprocessed)
-            response_keras = np.squeeze(response)
-
-            # Tensorflow inference
-            response = sess.run(
-                model_tensorflow,
-                feed_dict={
-                    inputs.placeholders: values_preprocessed
-                })
-            response_tensorflow = np.squeeze(response)
-
-            # Check compatibility
-            mean_error = np.mean(np.abs(response_keras - response_tensorflow))
-
-            if mean_error > 1e-5:
-                logger.fatal(
-                    "Found mean error of {} between Keras and TensorFlow output for event {}.".
-                    format(mean_error, i_event))
-                raise Exception
-
-            # Calculate first-order derivatives
-            deriv_values = sess.run(
-                deriv_ops[class_],
-                feed_dict={
-                    inputs.placeholders: values_preprocessed
-                })
-            deriv_values = np.squeeze(deriv_values)
-            deriv_class[i_event, :] = deriv_values
-
-            # Store weight
-            weights[i_event] = weight[0]
-
+        # Convert tree to numpy array and labels for variable columns and weight column
+        tdata, tcolumns = tree.AsMatrix(return_labels=True ,columns=variables)
+        wdata, wcolumns = tree.AsMatrix(return_labels=True ,columns=[config_test["weight_branch"]])
+        # Convert numpy array and labels to pandas dataframe for variable columns
+        pdata = pd.DataFrame(data=tdata, columns=tcolumns)
+        # Flatten weight column into 1d array
+        flat_weight = wdata.flatten()
+        # Apply preprocessing of training to variables
+        values_preprocessed = pd.DataFrame(data=preprocessing.transform(pdata), columns=tcolumns)
+        # Check for viable era
+        if not args.era in [2016, 2017, 2018]:
+            logger.fatal("Era must be 2016, 2017 or 2018 but is {}".format(args.era))
+            raise Exception
+        # Append one hot encoded era information to variables
+        # Append as int
+        values_preprocessed["era"] = args.era
+        # Expand to possible values (necessary for next step)
+        values_preprocessed["era"] = values_preprocessed["era"].astype(CategoricalDtype([2016, 2017, 2018]))
+        # Convert to one hot encoding and append
+        values_preprocessed = pd.concat([values_preprocessed, pd.get_dummies(values_preprocessed["era"], prefix="era")], axis=1)
+        # Remove int era column
+        values_preprocessed.drop(["era"], axis=1, inplace=True)
+        ###
+        # Get array of gradients of model wrt. samples 
+        gradients = tf.squeeze(get_gradients(model_keras, values_preprocessed, i_class))
+        # Get weighted average of gradients/ abs of gradients
         if args.no_abs:
-            mean_abs_deriv[class_] = np.average((deriv_class), weights=weights, axis=0)
+            mean_abs_deriv[class_] = np.average(gradients, weights=flat_weight, axis=0)
         else:
-            mean_abs_deriv[class_] = np.average(np.abs(deriv_class), weights=weights, axis=0)
+            mean_abs_deriv[class_] = np.average(np.abs(gradients), weights=flat_weight, axis=0)
 
     # Normalize rows
     classes = config_train["classes"]
