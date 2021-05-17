@@ -176,19 +176,20 @@ def main(args, config_test, config_train):
         # Apply preprocessing of training to variables
         values_preprocessed = pd.DataFrame(data=preprocessing.transform(pdata), columns=tcolumns)
         # Check for viable era
-        if not args.era in [2016, 2017, 2018]:
-            logger.fatal("Era must be 2016, 2017 or 2018 but is {}".format(args.era))
-            raise Exception
-        # Append one hot encoded era information to variables
-        # Append as int
-        values_preprocessed["era"] = args.era
-        # Expand to possible values (necessary for next step)
-        values_preprocessed["era"] = values_preprocessed["era"].astype(CategoricalDtype([2016, 2017, 2018]))
-        # Convert to one hot encoding and append
-        values_preprocessed = pd.concat([values_preprocessed, pd.get_dummies(values_preprocessed["era"], prefix="era")], axis=1)
-        # Remove int era column
-        values_preprocessed.drop(["era"], axis=1, inplace=True)
-        ###
+        if args.era:
+            if not args.era in [2016, 2017, 2018]:
+                logger.fatal("Era must be 2016, 2017 or 2018 but is {}".format(args.era))
+                raise Exception
+            # Append one hot encoded era information to variables
+            # Append as int
+            values_preprocessed["era"] = args.era
+            # Expand to possible values (necessary for next step)
+            values_preprocessed["era"] = values_preprocessed["era"].astype(CategoricalDtype([2016, 2017, 2018]))
+            # Convert to one hot encoding and append
+            values_preprocessed = pd.concat([values_preprocessed, pd.get_dummies(values_preprocessed["era"], prefix="era")], axis=1)
+            # Remove int era column
+            values_preprocessed.drop(["era"], axis=1, inplace=True)
+            ###
         # Get interference from trained model
         event_responses = get_values(model, values_preprocessed)
         # Determine class for each sample

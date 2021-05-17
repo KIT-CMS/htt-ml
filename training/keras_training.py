@@ -410,9 +410,9 @@ def main(args, config):
         # define tf.data.Dataset for input generator data
         traindata = tf.data.Dataset.from_generator(balancedBatchGenerator,
             output_signature=(
-                tf.TensorSpec(shape=(eventsPerClassAndBatch*len(classes)*len(eras),len(variables) + len_eras), dtype=tf.float64),
-                tf.TensorSpec(shape=(eventsPerClassAndBatch*len(classes)*len(eras),len(classes)), dtype=tf.float64),
-                tf.TensorSpec(shape=(eventsPerClassAndBatch*len(classes)*len(eras)), dtype=tf.float64)
+                tf.TensorSpec(shape=(eventsPerClassAndBatch*len(classes)*max(1, len(eras)),len(variables) + len_eras), dtype=tf.float64),
+                tf.TensorSpec(shape=(eventsPerClassAndBatch*len(classes)*max(1, len(eras)),len(classes)), dtype=tf.float64),
+                tf.TensorSpec(shape=(eventsPerClassAndBatch*len(classes)*max(1, len(eras))), dtype=tf.float64)
                 )
             )
         # define tf.data.Dataset for validation data
