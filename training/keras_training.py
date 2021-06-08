@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import logging
+
 logger = logging.getLogger("keras_training")
 
 import argparse
@@ -83,7 +84,7 @@ def main(args, config):
     print("Using {} from {}".format(tf.__version__, tf.__file__))
     physical_devices = tf.config.list_physical_devices('GPU')
     if physical_devices:
-        print ("Default GPU Devices: {}".format(physical_devices))
+        print("Default GPU Devices: {}".format(physical_devices))
         try:
             for device in physical_devices:
                 tf.config.experimental.set_memory_growth(device, True)
@@ -91,12 +92,12 @@ def main(args, config):
             # Invalid device or cannot modify virtual devices once initialized.
             pass
     else:
-        print ("No GPU found. Using CPU.")
+        print("No GPU found. Using CPU.")
 
     tf.compat.v1.set_random_seed(int(config["seed"]))
     from datetime import datetime
-    # dir for tensorboard 
-    log_dir = "logs/"+str(datetime.now().strftime("%H_%M_%S"))
+    # dir for tensorboard
+    log_dir = "logs/" + str(datetime.now().strftime("%H_%M_%S"))
     from sklearn import preprocessing, model_selection
     import keras_models
     from tensorflow.keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint, TensorBoard
@@ -109,7 +110,10 @@ def main(args, config):
         logger.debug("%s", v)
 
     if args.randomization:
-        signal_classes = [class_ for class_ in classes if class_.startswith(('ggh', 'qqh', 'vbftopo'))]
+        signal_classes = [
+            class_ for class_ in classes
+            if class_.startswith(('ggh', 'qqh', 'vbftopo'))
+        ]
         randomization_era = "2016"
     else:
         signal_classes = []
@@ -147,7 +151,8 @@ def main(args, config):
                 logger.debug("Process class %s.", class_)
                 tree = rfile.Get(class_)
                 if tree == None:
-                    logger.fatal("Tree %s not found in file %s.", class_, filename)
+                    logger.fatal("Tree %s not found in file %s.", class_,
+                                 filename)
                     raise Exception
                 friend_trees_names = [
                     k.GetName() for k in rfile.GetListOfKeys()
@@ -158,12 +163,15 @@ def main(args, config):
 
                 # Get inputs for this class
 
-                x_class = np.zeros((tree.GetEntries(), len(variables) + len_eras))
+                x_class = np.zeros(
+                    (tree.GetEntries(), len(variables) + len_eras))
                 x_conv = root_numpy.tree2array(tree, branches=variables)
                 for i_var, var in enumerate(variables):
                     x_class[:, i_var] = x_conv[var]
                 if np.any(np.isnan(x_class)):
-                    logger.fatal("Nan in class {} for era {} in file {} for any of {}".format(class_, era,filename,variables))
+                    logger.fatal(
+                        "Nan in class {} for era {} in file {} for any of {}".
+                        format(class_, era,filename,variables))
                     raise Exception
 
                 # One hot encode eras if conditional. Additionally randomize signal class eras if desired.
@@ -186,17 +194,22 @@ def main(args, config):
 
                 # Get weights
                 w_class = np.zeros((tree.GetEntries(), 1))
-                w_conv = root_numpy.tree2array(tree,
-                                            branches=[config["event_weights"]])
+                w_conv = root_numpy.tree2array(
+                    tree, branches=[config["event_weights"]])
                 if args.balance_batches:
                     w_class[:, 0] = w_conv[config["event_weights"]]
                 else:
                     if args.conditional:
-                        w_class[:, 0] = w_conv[config["event_weights"]] * config["class_weights_{}".format(era)][class_]
+                        w_class[:,
+                                0] = w_conv[config["event_weights"]] * config[
+                                    "class_weights_{}".format(era)][class_]
                     else:
-                        w_class[:, 0] = w_conv[config["event_weights"]] * config["class_weights"][class_]
+                        w_class[:, 0] = w_conv[config[
+                            "event_weights"]] * config["class_weights"][class_]
                 if np.any(np.isnan(w_class)):
-                    logger.fatal("Nan in weight class {} for era {} in file {}.".format(class_, era,filename))
+                    logger.fatal(
+                        "Nan in weight class {} for era {} in file {}.".format(
+                            class_, era,filename))
                     raise Exception
                 w_era.append(w_class)
 
@@ -231,7 +244,7 @@ def main(args, config):
             scaler = preprocessing.StandardScaler().fit(x_scaler)
             for var, mean, std in zip(variables, scaler.mean_, scaler.scale_):
                 logger.debug("Preprocessing (variable, mean, std): %s, %s, %s",
-                            var, mean, std)
+                             var, mean, std)
         elif "identity" in config["preprocessing"]:
             scaler = preprocessing.StandardScaler().fit(x_scaler)
             for i in range(len(scaler.mean_)):
@@ -239,26 +252,27 @@ def main(args, config):
                 scaler.scale_[i] = 1.0
             for var, mean, std in zip(variables, scaler.mean_, scaler.scale_):
                 logger.debug("Preprocessing (variable, mean, std): %s, %s, %s",
-                            var, mean, std)
+                             var, mean, std)
         elif "robust_scaler" in config["preprocessing"]:
             scaler = preprocessing.RobustScaler().fit(x_scaler)
-            for var, mean, std in zip(variables, scaler.center_, scaler.scale_):
+            for var, mean, std in zip(variables, scaler.center_,
+                                      scaler.scale_):
                 logger.debug("Preprocessing (variable, mean, std): %s, %s, %s",
-                            var, mean, std)
+                             var, mean, std)
         elif "min_max_scaler" in config["preprocessing"]:
-            scaler = preprocessing.MinMaxScaler(feature_range=(-1.0,
-                                                            1.0)).fit(x_scaler)
+            scaler = preprocessing.MinMaxScaler(
+                feature_range=(-1.0, 1.0)).fit(x_scaler)
             for var, min_, max_ in zip(variables, scaler.data_min_,
-                                    scaler.data_max_):
-                logger.debug("Preprocessing (variable, min, max): %s, %s, %s", var,
-                            min_, max_)
+                                       scaler.data_max_):
+                logger.debug("Preprocessing (variable, min, max): %s, %s, %s",
+                             var, min_, max_)
         elif "quantile_transformer" in config["preprocessing"]:
             scaler = preprocessing.QuantileTransformer(
                 output_distribution="normal",
                 random_state=int(config["seed"])).fit(x_scaler)
         else:
             logger.fatal("Preprocessing %s is not implemented.",
-                        config["preprocessing"])
+                         config["preprocessing"])
             raise Exception
         x[:, :len(variables)] = scaler.transform(x_scaler)
 
@@ -286,12 +300,16 @@ def main(args, config):
             EarlyStopping(patience=config["model"]["early_stopping"]))
 
     logger.info("Saving tensorboard logs in {}".format(log_dir))
-    callbacks.append(TensorBoard(log_dir=log_dir, profile_batch="2, {}".format(config["model"]["steps_per_epoch"])))
+    callbacks.append(
+        TensorBoard(log_dir=log_dir,
+                    profile_batch="2, {}".format(
+                        config["model"]["steps_per_epoch"])))
 
     path_model = os.path.join(config["output_path"],
                               "fold{}_keras_model.h5".format(args.fold))
     if os.path.exists(path_model):
-        print ("Path {} already exists! I will not overwrite it".format(path_model))
+        print("Path {} already exists! I will not overwrite it".format(
+            path_model))
         raise Exception
     if "save_best_only" in config["model"]:
         if config["model"]["save_best_only"]:
@@ -313,7 +331,7 @@ def main(args, config):
     logger.info("Train keras model %s.", config["model"]["name"])
 
     if config["model"]["eventsPerClassAndBatch"] < 0:
-        eventsPerClassAndBatch = x_train.shape[0]*len(classes)
+        eventsPerClassAndBatch = x_train.shape[0] * len(classes)
     else:
         eventsPerClassAndBatch = config["model"]["eventsPerClassAndBatch"]
 
@@ -326,7 +344,7 @@ def main(args, config):
         steps_per_epoch = int(config["model"]["steps_per_epoch"])*len(eras)
         recommend_steps_per_epoch = int(
             min([len(classIndexDict[class_])
-                for class_ in classes]) / (eventsPerClassAndBatch)) + 1
+                 for class_ in classes]) / (eventsPerClassAndBatch)) + 1
         logger.info(
             "steps_per_epoch: Using {} instead of recommended minimum of {}".
             format(str(steps_per_epoch), str(recommend_steps_per_epoch)))
@@ -350,13 +368,16 @@ def main(args, config):
             for i_era, era in enumerate(eras)
         }
         import threading
+
         # Sequence to generate data batches
         class balancedBatchGenerator:
             def __init__(self):
                 self.eventsPerClassAndBatch = eventsPerClassAndBatch
                 self.lock = threading.Lock()
+
             def __iter__(self):
                 return self
+
             def __next__(self):
                 with self.lock:
                     nperClass = int(eventsPerClassAndBatch)
@@ -379,11 +400,13 @@ def main(args, config):
                     ])
                     w_collect = np.concatenate([
                         w_train[selIdxDict[era][label]] *
-                        (eventsPerClassAndBatch / np.sum(w_train[selIdxDict[era][label]]))
+                        (eventsPerClassAndBatch /
+                         np.sum(w_train[selIdxDict[era][label]]))
                         for label in classes for era in eras
                     ])
                     # return list of choosen values
                     return x_collect, y_collect, w_collect
+
         def calculateValidationWeights(x_test, y_test, w_test):
             testIndexDict = {
                 era: {
@@ -414,52 +437,72 @@ def main(args, config):
             x_test, y_test, w_test)
 
         # define tf.data.Dataset for input generator data
-        traindata = tf.data.Dataset.from_generator(balancedBatchGenerator,
-            output_signature=(
-                tf.TensorSpec(shape=(eventsPerClassAndBatch*len(classes)*max(1, len(eras)),len(variables) + len_eras), dtype=tf.float64),
-                tf.TensorSpec(shape=(eventsPerClassAndBatch*len(classes)*max(1, len(eras)),len(classes)), dtype=tf.float64),
-                tf.TensorSpec(shape=(eventsPerClassAndBatch*len(classes)*max(1, len(eras))), dtype=tf.float64)
-                )
-            )
+        traindata = tf.data.Dataset.from_generator(
+            balancedBatchGenerator,
+            output_signature=(tf.TensorSpec(
+                shape=(eventsPerClassAndBatch * len(classes )*
+                       max(1, len(eras)),len(variables) + len_eras),
+                dtype=tf.float64),
+                              tf.TensorSpec(
+                                  shape=(eventsPerClassAndBatch *
+                                         len(classes) * max(1, len(eras)),
+                                         len(classes)),
+                                  dtype=tf.float64),
+                              tf.TensorSpec(
+                                  shape=(eventsPerClassAndBatch *
+                                         len(classes) * max(1, len(eras))),
+                                  dtype=tf.float64)))
         # define tf.data.Dataset for validation data
         validata = tf.data.Dataset.from_tensor_slices((x_test, y_test, w_test))
         # collect all data into single batch
         validata = validata.batch(len(x_test))
-        # Prefetch datasets to CPU or GPU if available 
+        # Prefetch datasets to CPU or GPU if available
         if physical_devices:
-            traindata = traindata.apply(tf.data.experimental.prefetch_to_device(tf.test.gpu_device_name(), tf.data.experimental.AUTOTUNE))
-            validata = validata.apply(tf.data.experimental.prefetch_to_device(tf.test.gpu_device_name(), tf.data.experimental.AUTOTUNE))
+            traindata = traindata.apply(
+                tf.data.experimental.prefetch_to_device(
+                    tf.test.gpu_device_name(), tf.data.experimental.AUTOTUNE))
+            validata = validata.apply(
+                tf.data.experimental.prefetch_to_device(
+                    tf.test.gpu_device_name(), tf.data.experimental.AUTOTUNE))
         else:
             traindata = traindata.prefetch(tf.data.experimental.AUTOTUNE)
             validata = validata.prefetch(tf.data.experimental.AUTOTUNE)
 
-        print("Timestamp training start: {}".format(datetime.now().strftime("%H:%M:%S")))
+        print("Timestamp training start: {}".format(
+            datetime.now().strftime("%H:%M:%S")))
         # Train model with prefetched datasets
-        history = model.fit(
-            traindata,
-            steps_per_epoch=steps_per_epoch,
-            epochs=config["model"]["epochs"],
-            callbacks=callbacks,
-            validation_data=validata,
-            verbose=2
+        history = model.fit(traindata,
+                            steps_per_epoch=steps_per_epoch,
+                            epochs=config["model"]["epochs"],
+                            callbacks=callbacks,
+                            validation_data=validata,
+                            verbose=2
         )
 
     else:
         with tf.device(device):
-            traindata = tf.data.Dataset.from_tensor_slices((x_train, y_train, w_train))
-            traindata = traindata.batch(eventsPerClassAndBatch*len(classes))
-            validata = tf.data.Dataset.from_tensor_slices((x_test, y_test, w_test))
+            traindata = tf.data.Dataset.from_tensor_slices(
+                (x_train, y_train, w_train))
+            traindata = traindata.batch(eventsPerClassAndBatch * len(classes))
+            validata = tf.data.Dataset.from_tensor_slices(
+                (x_test, y_test, w_test))
             validata = validata.batch(len(x_test))
             if physical_devices:
-                traindata = traindata.apply(tf.data.experimental.prefetch_to_device(tf.test.gpu_device_name(), tf.data.experimental.AUTOTUNE))
-                validata = validata.apply(tf.data.experimental.prefetch_to_device(tf.test.gpu_device_name(), tf.data.experimental.AUTOTUNE))
+                traindata = traindata.apply(
+                    tf.data.experimental.prefetch_to_device(
+                        tf.test.gpu_device_name(),
+                        tf.data.experimental.AUTOTUNE))
+                validata = validata.apply(
+                    tf.data.experimental.prefetch_to_device(
+                        tf.test.gpu_device_name(),
+                        tf.data.experimental.AUTOTUNE))
             else:
                 traindata = traindata.prefetch(tf.data.experimental.AUTOTUNE)
                 validata = validata.prefetch(tf.data.experimental.AUTOTUNE)
 
-
         from datetime import datetime
-        logger.info("Timestamp training start: {}".format(datetime.now().strftime("%H:%M:%S")))
+        logger.info("Timestamp training start: {}".format(
+            datetime.now().strftime("%H:%M:%S")))
         history = model.fit(traindata,
                             validation_data=validata,
                             epochs=config["model"]["epochs"],
@@ -467,7 +510,8 @@ def main(args, config):
                             callbacks=callbacks,
                             verbose=2)
 
-    logger.info("Timestamp training end: {}".format(datetime.now().strftime("%H:%M:%S")))
+    logger.info("Timestamp training end: {}".format(
+        datetime.now().strftime("%H:%M:%S")))
     # Plot loss
     epochs = range(1, len(history.history["loss"]) + 1)
     plt.plot(epochs, history.history["loss"], lw=3, label="Training loss")

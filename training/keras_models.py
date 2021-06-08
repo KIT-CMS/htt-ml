@@ -12,24 +12,26 @@ def example(num_inputs, num_outputs):
     """
     model = Sequential()
     model.add(
-        Dense(
-            10, init="glorot_normal", activation="relu", input_dim=num_inputs))
+        Dense(10,
+              init="glorot_normal",
+              activation="relu",
+              input_dim=num_inputs))
     model.add(Dense(num_outputs, init="glorot_uniform", activation="softmax"))
-    model.compile(
-        loss="categorical_crossentropy",
-        optimizer=Adam(),
-        metrics=[
-            "categorical_accuracy",
-        ])
+    model.compile(loss="categorical_crossentropy",
+                  optimizer=Adam(),
+                  metrics=[
+                      "categorical_accuracy",
+                  ])
     return model
 
 
 def smhtt_simple(num_inputs, num_outputs):
     model = Sequential()
     model.add(
-        Dense(
-            100, init="glorot_normal", activation="tanh",
-            input_dim=num_inputs))
+        Dense(100,
+              init="glorot_normal",
+              activation="tanh",
+              input_dim=num_inputs))
     model.add(Dense(num_outputs, init="glorot_normal", activation="softmax"))
     model.compile(loss="mean_squared_error", optimizer=Nadam(), metrics=[])
     return model
@@ -38,24 +40,21 @@ def smhtt_simple(num_inputs, num_outputs):
 def smhtt_mt(num_inputs, num_outputs):
     model = Sequential()
     model.add(
-        Dense(
-            300,
-            init="glorot_normal",
-            activation="tanh",
-            W_regularizer=l2(1e-4),
-            input_dim=num_inputs))
+        Dense(300,
+              init="glorot_normal",
+              activation="tanh",
+              W_regularizer=l2(1e-4),
+              input_dim=num_inputs))
     model.add(
-        Dense(
-            300,
-            init="glorot_normal",
-            activation="tanh",
-            W_regularizer=l2(1e-4)))
+        Dense(300,
+              init="glorot_normal",
+              activation="tanh",
+              W_regularizer=l2(1e-4)))
     model.add(
-        Dense(
-            300,
-            init="glorot_normal",
-            activation="tanh",
-            W_regularizer=l2(1e-4)))
+        Dense(300,
+              init="glorot_normal",
+              activation="tanh",
+              W_regularizer=l2(1e-4)))
     model.add(Dense(num_outputs, init="glorot_normal", activation="softmax"))
     model.compile(loss="mean_squared_error", optimizer=Nadam(), metrics=[])
     return model
@@ -64,12 +63,11 @@ def smhtt_mt(num_inputs, num_outputs):
 def smhtt_et(num_inputs, num_outputs):
     model = Sequential()
     model.add(
-        Dense(
-            1000,
-            init="glorot_normal",
-            activation="tanh",
-            W_regularizer=l2(1e-4),
-            input_dim=num_inputs))
+        Dense(1000,
+              init="glorot_normal",
+              activation="tanh",
+              W_regularizer=l2(1e-4),
+              input_dim=num_inputs))
     model.add(Dense(num_outputs, init="glorot_normal", activation="softmax"))
     model.compile(loss="mean_squared_error", optimizer=Nadam(), metrics=[])
     return model
@@ -78,24 +76,21 @@ def smhtt_et(num_inputs, num_outputs):
 def smhtt_tt(num_inputs, num_outputs):
     model = Sequential()
     model.add(
-        Dense(
-            200,
-            init="glorot_normal",
-            activation="tanh",
-            W_regularizer=l2(1e-4),
-            input_dim=num_inputs))
+        Dense(200,
+              init="glorot_normal",
+              activation="tanh",
+              W_regularizer=l2(1e-4),
+              input_dim=num_inputs))
     model.add(
-        Dense(
-            200,
-            init="glorot_normal",
-            activation="tanh",
-            W_regularizer=l2(1e-4)))
+        Dense(200,
+              init="glorot_normal",
+              activation="tanh",
+              W_regularizer=l2(1e-4)))
     model.add(
-        Dense(
-            200,
-            init="glorot_normal",
-            activation="tanh",
-            W_regularizer=l2(1e-4)))
+        Dense(200,
+              init="glorot_normal",
+              activation="tanh",
+              W_regularizer=l2(1e-4)))
     model.add(Dense(num_outputs, init="glorot_normal", activation="softmax"))
     model.compile(loss="mean_squared_error", optimizer=Nadam(), metrics=[])
     return model
@@ -104,24 +99,21 @@ def smhtt_tt(num_inputs, num_outputs):
 def smhtt_legacy(num_inputs, num_outputs):
     model = Sequential()
     model.add(
-        Dense(
-            300,
-            init="glorot_normal",
-            activation="relu",
-            W_regularizer=l2(1e-4),
-            input_dim=num_inputs))
+        Dense(300,
+              init="glorot_normal",
+              activation="relu",
+              W_regularizer=l2(1e-4),
+              input_dim=num_inputs))
     model.add(
-        Dense(
-            300,
-            init="glorot_normal",
-            activation="relu",
-            W_regularizer=l2(1e-4)))
+        Dense(300,
+              init="glorot_normal",
+              activation="relu",
+              W_regularizer=l2(1e-4)))
     model.add(
-        Dense(
-            300,
-            init="glorot_normal",
-            activation="relu",
-            W_regularizer=l2(1e-4)))
+        Dense(300,
+              init="glorot_normal",
+              activation="relu",
+              W_regularizer=l2(1e-4)))
     model.add(Dense(num_outputs, init="glorot_normal", activation="softmax"))
     model.compile(loss="mean_squared_error", optimizer=Adam(), metrics=[])
     return model
@@ -150,7 +142,9 @@ def smhtt_dropout_tanh(num_inputs, num_outputs):
 
     for i, nodes in enumerate([200] * 2):
         if i == 0:
-            model.add(Dense(nodes, kernel_regularizer=l2(1e-5), input_dim=num_inputs))
+            model.add(
+                Dense(nodes, kernel_regularizer=l2(1e-5),
+                      input_dim=num_inputs))
         else:
             model.add(Dense(nodes, kernel_regularizer=l2(1e-5)))
         model.add(Activation("tanh"))
@@ -159,15 +153,20 @@ def smhtt_dropout_tanh(num_inputs, num_outputs):
     model.add(Dense(num_outputs, kernel_regularizer=l2(1e-5)))
     model.add(Activation("softmax"))
 
-    model.compile(loss="categorical_crossentropy", optimizer=Adam(learning_rate=1e-4), weighted_metrics=["mean_squared_error"])
+    model.compile(loss="categorical_crossentropy",
+                  optimizer=Adam(learning_rate=1e-4),
+                  weighted_metrics=["mean_squared_error"])
     return model
+
 
 def smhtt_dropout_tanh_large(num_inputs, num_outputs):
     model = Sequential()
 
     for i, nodes in enumerate([512] * 4):
         if i == 0:
-            model.add(Dense(nodes, kernel_regularizer=l2(1e-5), input_dim=num_inputs))
+            model.add(
+                Dense(nodes, kernel_regularizer=l2(1e-5),
+                      input_dim=num_inputs))
         else:
             model.add(Dense(nodes, kernel_regularizer=l2(1e-5)))
         model.add(Activation("tanh"))
@@ -176,7 +175,9 @@ def smhtt_dropout_tanh_large(num_inputs, num_outputs):
     model.add(Dense(num_outputs, kernel_regularizer=l2(1e-5)))
     model.add(Activation("softmax"))
 
-    model.compile(loss="categorical_crossentropy", optimizer=Adam(learning_rate=1e-4), weighted_metrics=["mean_squared_error"])
+    model.compile(loss="categorical_crossentropy",
+                  optimizer=Adam(learning_rate=1e-4),
+                  weighted_metrics=["mean_squared_error"])
     return model
 
 
@@ -190,9 +191,11 @@ def smhtt_dropout_tanh_tensorflow(input_placeholder, keras_model):
             weights[weight.name] = np.array(array)
     w1 = tf.compat.v1.get_variable('w1', initializer=weights['dense/kernel:0'])
     b1 = tf.compat.v1.get_variable('b1', initializer=weights['dense/bias:0'])
-    w2 = tf.compat.v1.get_variable('w2', initializer=weights['dense_1/kernel:0'])
+    w2 = tf.compat.v1.get_variable('w2',
+                                   initializer=weights['dense_1/kernel:0'])
     b2 = tf.compat.v1.get_variable('b2', initializer=weights['dense_1/bias:0'])
-    w3 = tf.compat.v1.get_variable('w3', initializer=weights['dense_2/kernel:0'])
+    w3 = tf.compat.v1.get_variable('w3',
+                                   initializer=weights['dense_2/kernel:0'])
     b3 = tf.compat.v1.get_variable('b3', initializer=weights['dense_2/bias:0'])
 
     l1 = tf.tanh(tf.add(b1, tf.matmul(input_placeholder, w1)))

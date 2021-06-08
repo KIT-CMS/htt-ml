@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 import uproot
 import pandas as pd
-from pandas.api.types import CategoricalDtype 
+from pandas.api.types import CategoricalDtype
 from tensorflow.keras.models import load_model
 
 import logging
@@ -38,7 +38,11 @@ def parse_arguments():
     parser.add_argument("config_training", help="Path to training config file")
     parser.add_argument("config_testing", help="Path to testing config file")
     parser.add_argument("fold", type=int, help="Trained model to be tested.")
-    parser.add_argument("--era", type=int, required=False, default=None, help="Era to be tested.")
+    parser.add_argument("--era",
+                        type=int,
+                        required=False,
+                        default=None,
+                        help="Era to be tested.")
     return parser.parse_args()
 
 
@@ -73,21 +77,20 @@ def plot_confusion(confusion, classes, filename, label, markup='{:.2f}'):
     axis = plt.gca()
     for i in range(confusion.shape[0]):
         for j in range(confusion.shape[1]):
-            axis.text(
-                i + 0.5,
-                j + 0.5,
-                markup.format(confusion[i, -1 - j]),
-                ha='center',
-                va='center')
+            axis.text(i + 0.5,
+                      j + 0.5,
+                      markup.format(confusion[i, -1 - j]),
+                      ha='center',
+                      va='center')
     q = plt.pcolormesh(np.transpose(confusion)[::-1], cmap='Wistia')
     cbar = plt.colorbar(q)
     cbar.set_label(label, rotation=270, labelpad=50)
-    plt.xticks(
-        np.array(range(len(classes))) + 0.5, classes, rotation='vertical')
-    plt.yticks(
-        np.array(range(len(classes))) + 0.5,
-        classes[::-1],
-        rotation='horizontal')
+    plt.xticks(np.array(range(len(classes))) + 0.5,
+               classes,
+               rotation='vertical')
+    plt.yticks(np.array(range(len(classes))) + 0.5,
+               classes[::-1],
+               rotation='horizontal')
     plt.xlim(0, len(classes))
     plt.ylim(0, len(classes))
     plt.ylabel('Predicted class')
@@ -113,7 +116,7 @@ def print_matrix(p, title):
         stdout.write('\b\b\\\\\n')
 
 
-def main(args, config_test, config_train):    
+def main(args, config_test, config_train):
     logger.info("Using {} from {}".format(tf.__version__, tf.__file__))
     physical_devices = tf.config.list_physical_devices('GPU')
     if physical_devices:
@@ -138,18 +141,19 @@ def main(args, config_test, config_train):
     model = load_model(path)
 
     if args.era:
-        path = os.path.join(config_train["datasets_{}".format(args.era)][(1, 0)[args.fold]])
+        path = os.path.join(config_train["datasets_{}".format(
+            args.era)][(1, 0)[args.fold]])
         class_weights = config_train["class_weights_{}".format(args.era)]
     else:
         path = os.path.join(config_train["datasets"][(1, 0)[args.fold]])
         class_weights = config_train["class_weights"]
 
-    # Function to compute model answers in optimized graph mode    
+    # Function to compute model answers in optimized graph mode
     @tf.function
     def get_values(model, samples):
         responses = model(sample_tensor, training=False)
         return responses
-    
+
     logger.info("Loop over test dataset %s to get model response.", path)
     file_ = ROOT.TFile(path)
     upfile = uproot.open(path)
@@ -161,8 +165,10 @@ def main(args, config_test, config_train):
         dtype=np.float)
     classes = config_train["classes"]
     for i_class, class_ in enumerate(classes):
-        logger.debug("Current time_start: {}".format(datetime.now().strftime("%H:%M:%S:%f")))
-        logger.debug("Process class %s. with weight %s", class_, class_weights[class_])
+        logger.debug("Current time_start: {}".format(
+            datetime.now().strftime("%H:%M:%S:%f")))
+        logger.debug("Process class %s. with weight %s", class_,
+                     class_weights[class_])
 
         tree = file_.Get(class_)
         uptree = upfile[class_]
@@ -175,32 +181,45 @@ def main(args, config_test, config_train):
         for variable in variables:
             typename = tree.GetLeaf(variable).GetTypeName()
             if not (typename == "Float_t" or typename == "Int_t"):
-                logger.fatal("Variable {} has unknown type {}.".format(variable, typename))
+                logger.fatal("Variable {} has unknown type {}.".format(
+                    variable, typename))
                 raise Exception
         if not tree.GetLeaf(weights).GetTypeName() == "Float_t":
-            logger.fatal(
-                "Weight branch has unkown type: {}".format(tree.GetLeaf(weights).GetTypeName()))
+            logger.fatal("Weight branch has unkown type: {}".format(
+                tree.GetLeaf(weights).GetTypeName()))
             raise Exception
 
         # Convert tree to pandas dataframe for variable columns and weight column
-        values_weights = uptree.arrays(expressions=variables+[weights], library="pd")
-        for val_wei in uptree.iterate(expressions=variables+[weights], library="pd", step_size=10000):
+        values_weights = uptree.arrays(expressions=variables+[weights],
+                                       library="pd")
+        for val_wei in uptree.iterate(expressions=variables+[weights],
+                                      library="pd",
+                                      step_size=10000):
             # Get weights from dataframe
             flat_weight = val_wei[weights]
             # Apply preprocessing of training to variables
-            values_preprocessed = pd.DataFrame(data=preprocessing.transform(val_wei[variables]), columns=val_wei[variables].keys())
+            values_preprocessed = pd.DataFrame(
+                data=preprocessing.transform(val_wei[variables]),
+                columns=val_wei[variables].keys())
             # Check for viable era
             if args.era:
                 if not args.era in [2016, 2017, 2018]:
-                    logger.fatal("Era must be 2016, 2017 or 2018 but is {}".format(args.era))
+                    logger.fatal(
+                        "Era must be 2016, 2017 or 2018 but is {}".format(
+                            args.era))
                     raise Exception
                 # Append one hot encoded era information to variables
                 # Append as int
                 values_preprocessed["era"] = args.era
                 # Expand to possible values (necessary for next step)
-                values_preprocessed["era"] = values_preprocessed["era"].astype(CategoricalDtype([2016, 2017, 2018]))
+                values_preprocessed["era"] = values_preprocessed["era"].astype(
+                    CategoricalDtype([2016, 2017, 2018]))
                 # Convert to one hot encoding and append
-                values_preprocessed = pd.concat([values_preprocessed, pd.get_dummies(values_preprocessed["era"], prefix="era")], axis=1)
+                values_preprocessed = pd.concat([
+                    values_preprocessed,
+                    pd.get_dummies(values_preprocessed["era"], prefix="era")
+                ],
+                                                axis=1)
                 # Remove int era column
                 values_preprocessed.drop(["era"], axis=1, inplace=True)
                 ###
@@ -212,14 +231,16 @@ def main(args, config_test, config_train):
             max_indexes = np.argmax(event_responses, axis=1)
             # Sum over weights of samples for each response
             for i, indexes in enumerate(classes):
-                confusion[i_class, i] += np.sum(flat_weight[max_indexes==i])
-                confusion2[i_class, i] += np.sum(flat_weight[max_indexes==i]*class_weights[class_])
+                confusion[i_class, i] += np.sum(flat_weight[max_indexes == i])
+                confusion2[i_class, i] += np.sum(
+                    flat_weight[max_indexes == i]*class_weights[class_])
     
     # Debug output to ensure that plotting is correct
     for i_class, class_ in enumerate(config_train["classes"]):
         logger.debug("True class: {}".format(class_))
         for j_class, class2 in enumerate(config_train["classes"]):
-            logger.debug("Predicted {}: {}".format(class2, confusion[i_class, j_class]))
+            logger.debug("Predicted {}: {}".format(class2, confusion[i_class,
+                                                                     j_class]))
 
     # Plot confusion matrix
     logger.info("Write confusion matrices.")
@@ -231,20 +252,26 @@ def main(args, config_test, config_train):
                                  "fold{}_keras_confusion_{}{}")
 
     plot_confusion(confusion, config_train["classes"],
-                   path_template.format(args.fold, "standard", era), "Arbitrary unit")
+                   path_template.format(args.fold, "standard", era),
+                   "Arbitrary unit")
     plot_confusion(confusion2, config_train["classes"],
-                   path_template.format(args.fold, "standard_cw", era), "Arbitrary unit")
+                   path_template.format(args.fold, "standard_cw", era),
+                   "Arbitrary unit")
 
     confusion_eff1, confusion_eff2 = get_efficiency_representations(confusion)
     confusion_eff3, confusion_eff4 = get_efficiency_representations(confusion2)
     plot_confusion(confusion_eff1, config_train["classes"],
-                   path_template.format(args.fold, "efficiency1", era), "Efficiency")
+                   path_template.format(args.fold, "efficiency1", era),
+                   "Efficiency")
     plot_confusion(confusion_eff2, config_train["classes"],
-                   path_template.format(args.fold, "efficiency2", era), "Efficiency")
+                   path_template.format(args.fold, "efficiency2", era),
+                   "Efficiency")
     plot_confusion(confusion_eff3, config_train["classes"],
-                   path_template.format(args.fold, "efficiency_cw1", era), "Efficiency")
+                   path_template.format(args.fold, "efficiency_cw1", era),
+                   "Efficiency")
     plot_confusion(confusion_eff4, config_train["classes"],
-                   path_template.format(args.fold, "efficiency_cw2", era), "Efficiency")
+                   path_template.format(args.fold, "efficiency_cw2", era),
+                   "Efficiency")
 
     confusion_pur1, confusion_pur2 = get_purity_representations(confusion)
     confusion_pur3, confusion_pur4 = get_purity_representations(confusion2)
@@ -253,9 +280,11 @@ def main(args, config_test, config_train):
     plot_confusion(confusion_pur2, config_train["classes"],
                    path_template.format(args.fold, "purity2", era), "Purity")
     plot_confusion(confusion_pur3, config_train["classes"],
-                   path_template.format(args.fold, "purity_cw1", era), "Purity")
+                   path_template.format(args.fold, "purity_cw1", era),
+                   "Purity")
     plot_confusion(confusion_pur4, config_train["classes"],
-                   path_template.format(args.fold, "purity_cw2", era), "Purity")
+                   path_template.format(args.fold, "purity_cw2", era),
+                   "Purity")
 
 
 if __name__ == "__main__":
@@ -263,5 +292,8 @@ if __name__ == "__main__":
     config_test = parse_config(args.config_testing)
     logger.info(config_test)
     config_train = parse_config(args.config_training)
-    logger.info({key: value for key, value in config_train.items() if key != "processes"})
+    logger.info({
+        key: value
+        for key, value in config_train.items() if key != "processes"
+    })
     main(args, config_test, config_train)
