@@ -207,7 +207,7 @@ def main(args, config_test, config_train):
         len_inputs = len(variables) + len(eras)
         #Size sum(n, 1, x){n} + x = x*(x+3)/2
         deriv_values_intermediate = np.zeros(
-            int((len_inputs * (len_inputs + 3)) / 2.)) 
+            int((len_inputs * (len_inputs + 3)) / 2.))
         deriv_weights_intermediate = 0
 
         for variable in variables:
@@ -268,7 +268,7 @@ def main(args, config_test, config_train):
             # Get array of hessians of model wrt. samples
             hessians = tf.squeeze(get_hessians(model_keras, sample_tensor,
                                                i_class),
-                                  axis=2)            
+                                  axis=2)
             # Fix dimensions if only one sample remains
             if len(val_wei) == 1:
                 flat_weight = np.array(flat_weight)

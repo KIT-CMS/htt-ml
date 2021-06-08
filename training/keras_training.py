@@ -440,7 +440,7 @@ def main(args, config):
         traindata = tf.data.Dataset.from_generator(
             balancedBatchGenerator,
             output_signature=(tf.TensorSpec(
-                shape=(eventsPerClassAndBatch * len(classes ) *
+                shape=(eventsPerClassAndBatch * len(classes) *
                        max(1, len(eras)), len(variables) + len_eras),
                 dtype=tf.float64),
                               tf.TensorSpec(
