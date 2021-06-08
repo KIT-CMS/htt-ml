@@ -28,7 +28,6 @@ import uproot
 import pandas as pd
 from pandas.api.types import CategoricalDtype
 
-
 import logging
 
 logger = logging.getLogger("keras_taylor_ranking")
@@ -199,7 +198,7 @@ def main(args, config_test, config_train):
             raise Exception
         friend_trees_names = [
             k.GetName() for k in file_.GetListOfKeys()
-            if k.GetName().startswith("_".join([class_,"friend"]))
+            if k.GetName().startswith("_".join([class_, "friend"]))
         ]
         for friend in friend_trees_names:
             tree.AddFriend(friend)
@@ -208,7 +207,7 @@ def main(args, config_test, config_train):
         len_inputs = len(variables) + len(eras)
         #Size sum(n, 1, x){n} + x = x*(x+3)/2
         deriv_values_intermediate = np.zeros(
-            int((len_inputs*(len_inputs+3)) / 2.)) 
+            int((len_inputs * (len_inputs + 3)) / 2.)) 
         deriv_weights_intermediate = 0
 
         for variable in variables:
@@ -224,13 +223,14 @@ def main(args, config_test, config_train):
 
         length_variables = len(variables) + len(eras)
         length_deriv_class = (length_variables**2 +
-                              length_variables)/2 + length_variables
+                              length_variables) / 2 + length_variables
 
         # Convert tree to pandas dataframe for variable columns and weight column
         values_weights = uptree.arrays(expressions=variables + [weights_class],
                                        library="pd")
         for val_wei in uptree.iterate(expressions=variables + [weights_class],
-                                      library="pd", step_size=10000):
+                                      library="pd",
+                                      step_size=10000):
             # Get weights from dataframe
             flat_weight = val_wei[weights_class]
             # Apply preprocessing of training to variables

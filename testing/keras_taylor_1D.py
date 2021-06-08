@@ -143,7 +143,7 @@ def main(args, config_test, config_train):
             raise Exception
         friend_trees_names = [
             k.GetName() for k in file_.GetListOfKeys()
-            if k.GetName().startswith("_".join([class_,"friend"]))
+            if k.GetName().startswith("_".join([class_, "friend"]))
         ]
         for friend in friend_trees_names:
             tree.AddFriend(friend)
@@ -163,9 +163,9 @@ def main(args, config_test, config_train):
             raise Exception
 
         # Convert tree to pandas dataframe for variable columns and weight column
-        values_weights = uptree.arrays(expressions=variables+[weights],
+        values_weights = uptree.arrays(expressions=variables + [weights],
                                        library="pd")
-        for val_wei in uptree.iterate(expressions=variables+[weights],
+        for val_wei in uptree.iterate(expressions=variables + [weights],
                                       library="pd",
                                       step_size=10000):
             # Get weights from dataframe
@@ -198,8 +198,10 @@ def main(args, config_test, config_train):
                 ###
             # Transform numpy array with samples to tensorflow tensor
             sample_tensor = tf.convert_to_tensor(values_preprocessed)
-            # Get array of gradients of model wrt. samples 
-            gradients = tf.squeeze(get_gradients(model_keras, sample_tensor, i_class), axis=1)
+            # Get array of gradients of model wrt. samples
+            gradients = tf.squeeze(get_gradients(model_keras, sample_tensor,
+                                                 i_class),
+                                   axis=1)
 
             # Fix dimensions if only one sample remains
             if len(val_wei) == 1:

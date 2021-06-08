@@ -171,7 +171,7 @@ def main(args, config):
                 if np.any(np.isnan(x_class)):
                     logger.fatal(
                         "Nan in class {} for era {} in file {} for any of {}".
-                        format(class_, era,filename,variables))
+                        format(class_, era, filename, variables))
                     raise Exception
 
                 # One hot encode eras if conditional. Additionally randomize signal class eras if desired.
@@ -209,7 +209,7 @@ def main(args, config):
                 if np.any(np.isnan(w_class)):
                     logger.fatal(
                         "Nan in weight class {} for era {} in file {}.".format(
-                            class_, era,filename))
+                            class_, era, filename))
                     raise Exception
                 w_era.append(w_class)
 
@@ -341,7 +341,7 @@ def main(args, config):
         for i_class, label in enumerate(classes)
     }
     if "steps_per_epoch" in config["model"]:
-        steps_per_epoch = int(config["model"]["steps_per_epoch"])*len(eras)
+        steps_per_epoch = int(config["model"]["steps_per_epoch"]) * len(eras)
         recommend_steps_per_epoch = int(
             min([len(classIndexDict[class_])
                  for class_ in classes]) / (eventsPerClassAndBatch)) + 1
@@ -440,8 +440,8 @@ def main(args, config):
         traindata = tf.data.Dataset.from_generator(
             balancedBatchGenerator,
             output_signature=(tf.TensorSpec(
-                shape=(eventsPerClassAndBatch * len(classes )*
-                       max(1, len(eras)),len(variables) + len_eras),
+                shape=(eventsPerClassAndBatch * len(classes ) *
+                       max(1, len(eras)), len(variables) + len_eras),
                 dtype=tf.float64),
                               tf.TensorSpec(
                                   shape=(eventsPerClassAndBatch *
@@ -476,8 +476,7 @@ def main(args, config):
                             epochs=config["model"]["epochs"],
                             callbacks=callbacks,
                             validation_data=validata,
-                            verbose=2
-        )
+                            verbose=2)
 
     else:
         with tf.device(device):

@@ -190,9 +190,9 @@ def main(args, config_test, config_train):
             raise Exception
 
         # Convert tree to pandas dataframe for variable columns and weight column
-        values_weights = uptree.arrays(expressions=variables+[weights],
+        values_weights = uptree.arrays(expressions=variables + [weights],
                                        library="pd")
-        for val_wei in uptree.iterate(expressions=variables+[weights],
+        for val_wei in uptree.iterate(expressions=variables + [weights],
                                       library="pd",
                                       step_size=10000):
             # Get weights from dataframe
@@ -233,8 +233,8 @@ def main(args, config_test, config_train):
             for i, indexes in enumerate(classes):
                 confusion[i_class, i] += np.sum(flat_weight[max_indexes == i])
                 confusion2[i_class, i] += np.sum(
-                    flat_weight[max_indexes == i]*class_weights[class_])
-    
+                    flat_weight[max_indexes == i] * class_weights[class_])
+
     # Debug output to ensure that plotting is correct
     for i_class, class_ in enumerate(config_train["classes"]):
         logger.debug("True class: {}".format(class_))
