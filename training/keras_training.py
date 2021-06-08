@@ -83,9 +83,15 @@ def main(args, config):
     print("Using {} from {}".format(tf.__version__, tf.__file__))
     physical_devices = tf.config.list_physical_devices('GPU')
     if physical_devices:
-      print ("Default GPU Devices: {}".format(physical_devices))
+        print ("Default GPU Devices: {}".format(physical_devices))
+        try:
+            for device in physical_devices:
+                tf.config.experimental.set_memory_growth(device, True)
+        except:
+            # Invalid device or cannot modify virtual devices once initialized.
+            pass
     else:
-      print ("No GPU found. Using CPU.")
+        print ("No GPU found. Using CPU.")
 
     tf.compat.v1.set_random_seed(int(config["seed"]))
     from datetime import datetime

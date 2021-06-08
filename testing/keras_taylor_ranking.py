@@ -22,6 +22,7 @@ sys.path.append('htt-ml/utils')
 
 import tensorflow as tf
 from tensorflow.keras.models import load_model
+import uproot
 import pandas as pd
 from pandas.api.types import CategoricalDtype 
 
@@ -54,7 +55,18 @@ def parse_config(filename):
     return yaml.load(open(filename, "r"), Loader=yaml.SafeLoader)
 
 def main(args, config_test, config_train):
-    logger.info("Tensorflow version: {}".format(tf.__version__))
+    logger.info("Using {} from {}".format(tf.__version__, tf.__file__))
+    physical_devices = tf.config.list_physical_devices('GPU')
+    if physical_devices:
+        logger.info("Default GPU Devices: {}".format(physical_devices))
+        try:
+            for device in physical_devices:
+                tf.config.experimental.set_memory_growth(device, True)
+        except:
+            # Invalid device or cannot modify virtual devices once initialized.
+            pass
+    else:
+        logger.info("No GPU found. Using CPU.")
     # Load preprocessing
     path = os.path.join(config_train["output_path"],
                         config_test["preprocessing"][args.fold])
@@ -63,6 +75,7 @@ def main(args, config_test, config_train):
 
     classes = config_train["classes"]
     variables = config_train["variables"]
+    weights_class = config_test["weight_branch"]
 
     # Define eras
     if args.era:
@@ -130,9 +143,20 @@ def main(args, config_test, config_train):
         hessians = tf.vectorized_map(get_single_hessian, sample_tensor)
         return hessians
 
+    # Function to get upper triangle of matrix for every matrix in array
+    def triu_map(matrix_array, size):
+        # get upper triangle indices for given matrix size
+        triu = np.triu_indices(size)
+        # Function to apply indices to single element of matrix array and get single output 
+        def single_triu(single_mat):
+            return single_mat[triu]
+        # Apply function to every element
+        return np.array(list(map(single_triu, matrix_array)))
+
     # Loop over testing dataset
     logger.info("Loop over test dataset %s to get model response.", path)
     file_ = ROOT.TFile(path)
+    upfile = uproot.open(path)
     deriv_class = {}
     weights = {}
 
@@ -144,18 +168,26 @@ def main(args, config_test, config_train):
             logger.fatal("Tree %s does not exist.", class_)
             raise Exception
 
-
+    # Initalize variables 
+    mean_deriv = {}
+    class_deriv_weights = {}
     for i_class, class_ in enumerate(classes):
         logger.debug("Current time: {}".format(datetime.now().strftime("%H:%M:%S")))
         logger.debug("Process class %s.", class_)
 
         tree = file_.Get(class_)
+        uptree = upfile[class_]
         if tree == None:
             logger.fatal("Tree %s does not exist.", class_)
             raise Exception
         friend_trees_names = [k.GetName() for k in file_.GetListOfKeys() if k.GetName().startswith("_".join([class_,"friend"]))]
         for friend in friend_trees_names:
             tree.AddFriend(friend)
+
+        # Initalize variables
+        len_inputs = len(variables)+len(eras)
+        deriv_values_intermediate = np.zeros(int((len_inputs*(len_inputs+3))/2.)) #Size sum(n, 1, x){n} + x = x*(x+3)/2
+        deriv_weights_intermediate = 0
 
         for variable in variables:
             typename = tree.GetLeaf(variable).GetTypeName()
@@ -164,79 +196,72 @@ def main(args, config_test, config_train):
                 raise Exception
         if tree.GetLeaf(variable).GetTypeName() != "Float_t":
             logger.fatal(
-                "Weight branch has unkown type: {}".format(tree.GetLeaf(config_test["weight_branch"]).GetTypeName()))
+                "Weight branch has unkown type: {}".format(tree.GetLeaf(weights_class).GetTypeName()))
             raise Exception
 
         length_variables = len(variables) + len(eras)
         length_deriv_class = (length_variables**2 + length_variables)/2 + length_variables
 
-        # Function to get upper triangle of matrix for every matrix in array
-        def triu_map(matrix_array, size):
-            # get upper triangle indices for given matrix size
-            triu = np.triu_indices(size)
-            # Function to apply indices to single element of matrix array and get single output 
-            def single_triu(single_mat):
-                return single_mat[triu]
-            # Apply function to every element
-            return np.array(list(map(single_triu, matrix_array)))
+        # Convert tree to pandas dataframe for variable columns and weight column
+        values_weights = uptree.arrays(expressions=variables+[weights_class], library="pd")
+        for val_wei in uptree.iterate(expressions=variables+[weights_class], library="pd", step_size=10000):
+            # Get weights from dataframe
+            flat_weight = val_wei[weights_class]
+            # Apply preprocessing of training to variables
+            values_preprocessed = pd.DataFrame(data=preprocessing.transform(val_wei[variables]), columns=val_wei[variables].keys())
+            # Check for viable era
+            if args.era:
+                if not args.era in [2016, 2017, 2018]:
+                    logger.fatal("Era must be 2016, 2017 or 2018 but is {}".format(args.era))
+                    raise Exception
+                # Append one hot encoded era information to variables
+                # Append as int
+                values_preprocessed["era"] = args.era
+                # Expand to possible values (necessary for next step)
+                values_preprocessed["era"] = values_preprocessed["era"].astype(CategoricalDtype([2016, 2017, 2018]))
+                # Convert to one hot encoding and append
+                values_preprocessed = pd.concat([values_preprocessed, pd.get_dummies(values_preprocessed["era"], prefix="era")], axis=1)
+                # Remove int era column
+                values_preprocessed.drop(["era"], axis=1, inplace=True)
+                ###
+            # Transform numpy array with samples to tensorflow tensor
+            sample_tensor = tf.convert_to_tensor(values_preprocessed)
+            # Get array of gradients of model wrt. samples 
+            gradients = tf.squeeze(get_gradients(model_keras, sample_tensor, i_class), axis=1)
+            # Get array of hessians of model wrt. samples 
+            hessians = tf.squeeze(get_hessians(model_keras, sample_tensor, i_class), axis=2)            
+            # Fix dimensions if only one sample remains
+            if len(val_wei)==1:
+                flat_weight = np.array(flat_weight)
+            # Get array of upper triangles of hessians of model wrt. samples 
+            upper_hessian_half = triu_map(hessians.numpy(), length_variables)
+            # Append gradient values to hessian values
+            deriv_values = np.concatenate((gradients, upper_hessian_half), axis=1)
 
-        # Convert tree to numpy array and labels for variable columns and weight column
-        tdata, tcolumns = tree.AsMatrix(return_labels=True ,columns=variables)
-        wdata, wcolumns = tree.AsMatrix(return_labels=True ,columns=[config_test["weight_branch"]])
-        # Convert numpy array and labels to pandas dataframe for variable columns
-        pdata = pd.DataFrame(data=tdata, columns=tcolumns)
-        # Flatten weight column into 1d array
-        flat_weight = wdata.flatten()
-        # Apply preprocessing of training to variables
-        values_preprocessed = pd.DataFrame(data=preprocessing.transform(pdata), columns=tcolumns)
-        # Check for viable era
-        if args.era:
-            if not args.era in [2016, 2017, 2018]:
-                logger.fatal("Era must be 2016, 2017 or 2018 but is {}".format(args.era))
-                raise Exception
-            # Append one hot encoded era information to variables
-            # Append as int
-            values_preprocessed["era"] = args.era
-            # Expand to possible values (necessary for next step)
-            values_preprocessed["era"] = values_preprocessed["era"].astype(CategoricalDtype([2016, 2017, 2018]))
-            # Convert to one hot encoding and append
-            values_preprocessed = pd.concat([values_preprocessed, pd.get_dummies(values_preprocessed["era"], prefix="era")], axis=1)
-            # Remove int era column
-            values_preprocessed.drop(["era"], axis=1, inplace=True)
-            ###
-        # Transform numpy array with samples to tensorflow tensor
-        sample_tensor = tf.convert_to_tensor(values_preprocessed)
-        # Get array of gradients of model wrt. samples 
-        gradients = tf.squeeze(get_gradients(model_keras, sample_tensor, i_class))
-        # Get array of hessians of model wrt. samples 
-        hessians = tf.squeeze(get_hessians(model_keras, sample_tensor, i_class))
-        # Get array of upper triangles of hessians of model wrt. samples 
-        upper_hessian_half = triu_map(hessians.numpy(), length_variables)
-        # Append gradient values to hessian values
-        deriv_values = np.concatenate((gradients, upper_hessian_half), axis=1)
-        # Collect results for class
-        deriv_class[class_] = deriv_values
-        weights[class_] = flat_weight
-        
-    # Calculate taylor coefficients
-    mean_abs_deriv = {}
-    for class_ in classes:
-        if args.no_abs:
-            mean_abs_deriv[class_] = np.average(
-                (deriv_class[class_]), weights=weights[class_], axis=0)
-        else:
-            mean_abs_deriv[class_] = np.average(
-                np.abs(deriv_class[class_]), weights=weights[class_], axis=0)
+            ## Calculate taylor coefficients ##
+            # Add coefficients / abs of coefficients to previous results
+            if args.no_abs:
+                deriv_values = np.concatenate(([deriv_values_intermediate], deriv_values), axis=0)
+            else:
+                deriv_values = np.concatenate(([deriv_values_intermediate], np.abs(deriv_values)), axis=0)
+            # Add weights coefficients to previous weights
+            deriv_weights = np.concatenate(([deriv_weights_intermediate], flat_weight), axis=0)
+            # Calculate intermeiate results for coefficients and weights
+            deriv_values_intermediate = np.average(deriv_values, weights=deriv_weights, axis=0)
+            deriv_weights_intermediate = np.sum(deriv_weights)
+        # save total average of derivatives and sum of weights for each class
+        mean_deriv[class_] = deriv_values_intermediate
+        class_deriv_weights[class_] = [deriv_weights_intermediate]
 
-    deriv_all = np.vstack([deriv_class[class_] for class_ in classes])
-    weights_all = np.hstack([weights[class_] for class_ in classes])
+    deriv_all = np.vstack([mean_deriv[class_] for class_ in classes])
+    weights_all = np.hstack([class_deriv_weights[class_] for class_ in classes])
     if args.no_abs:
-        mean_abs_deriv_all = np.average(
+        mean_deriv_all = np.average(
             (deriv_all), weights=weights_all, axis=0)
     else:
-        mean_abs_deriv_all = np.average(
+        mean_deriv_all = np.average(
             np.abs(deriv_all), weights=weights_all, axis=0)
-    mean_abs_deriv["all"] = mean_abs_deriv_all
+    mean_deriv["all"] = mean_deriv_all
 
     # Get ranking
     ranking = {}
@@ -244,7 +269,7 @@ def main(args, config_test, config_train):
     for class_ in classes + ["all"]:
         labels_tmp = []
         ranking_tmp = []
-        for names, value in zip(deriv_ops_names, mean_abs_deriv[class_]):
+        for names, value in zip(deriv_ops_names, mean_deriv[class_]):
             labels_tmp.append(", ".join(names))
             if len(names) == 2:
                 if names[0] == names[1]:
@@ -267,7 +292,7 @@ def main(args, config_test, config_train):
     for class_ in classes + ["all"]:
         labels_tmp = []
         ranking_tmp = []
-        for names, value in zip(deriv_ops_names, mean_abs_deriv[class_]):
+        for names, value in zip(deriv_ops_names, mean_deriv[class_]):
             if len(names) > 1:
                 continue
             labels_tmp.append(", ".join(names))

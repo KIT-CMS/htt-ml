@@ -18,6 +18,7 @@ mpl.use('Agg')
 mpl.rcParams['font.size'] = 16
 import matplotlib.pyplot as plt
 import tensorflow as tf
+import uproot
 import pandas as pd
 from pandas.api.types import CategoricalDtype 
 from tensorflow.keras.models import load_model
@@ -112,7 +113,20 @@ def print_matrix(p, title):
         stdout.write('\b\b\\\\\n')
 
 
-def main(args, config_test, config_train):
+def main(args, config_test, config_train):    
+    logger.info("Using {} from {}".format(tf.__version__, tf.__file__))
+    physical_devices = tf.config.list_physical_devices('GPU')
+    if physical_devices:
+        logger.info("Default GPU Devices: {}".format(physical_devices))
+        try:
+            for device in physical_devices:
+                tf.config.experimental.set_memory_growth(device, True)
+        except:
+            # Invalid device or cannot modify virtual devices once initialized.
+            pass
+    else:
+        logger.info("No GPU found. Using CPU.")
+
     path = os.path.join(config_train["output_path"],
                         config_test["preprocessing"][args.fold])
     logger.info("Load preprocessing %s.", path)
@@ -133,12 +147,12 @@ def main(args, config_test, config_train):
     # Function to compute model answers in optimized graph mode    
     @tf.function
     def get_values(model, samples):
-        sample_tensor = tf.convert_to_tensor(samples)
         responses = model(sample_tensor, training=False)
         return responses
     
     logger.info("Loop over test dataset %s to get model response.", path)
     file_ = ROOT.TFile(path)
+    upfile = uproot.open(path)
     confusion = np.zeros(
         (len(config_train["classes"]), len(config_train["classes"])),
         dtype=np.float)
@@ -151,53 +165,55 @@ def main(args, config_test, config_train):
         logger.debug("Process class %s. with weight %s", class_, class_weights[class_])
 
         tree = file_.Get(class_)
+        uptree = upfile[class_]
         if tree == None:
             logger.fatal("Tree %s does not exist.", class_)
             raise Exception
 
         variables = config_train["variables"]
+        weights = config_test["weight_branch"]
         for variable in variables:
             typename = tree.GetLeaf(variable).GetTypeName()
             if not (typename == "Float_t" or typename == "Int_t"):
                 logger.fatal("Variable {} has unknown type {}.".format(variable, typename))
                 raise Exception
-        if not tree.GetLeaf(config_test["weight_branch"]).GetTypeName() == "Float_t":
+        if not tree.GetLeaf(weights).GetTypeName() == "Float_t":
             logger.fatal(
-                "Weight branch has unkown type: {}".format(tree.GetLeaf(config_test["weight_branch"]).GetTypeName()))
+                "Weight branch has unkown type: {}".format(tree.GetLeaf(weights).GetTypeName()))
             raise Exception
 
-        # Convert tree to numpy array and labels for variable columns and weight column
-        tdata, tcolumns = tree.AsMatrix(return_labels=True ,columns=variables)
-        wdata, wcolumns = tree.AsMatrix(return_labels=True ,columns=[config_test["weight_branch"]])
-        # Convert numpy array and labels to pandas dataframe for variable columns and weight column
-        pdata = pd.DataFrame(data=tdata, columns=tcolumns)
-        # Flatten weight column into 1d array
-        flat_weight = wdata.flatten()
-        # Apply preprocessing of training to variables
-        values_preprocessed = pd.DataFrame(data=preprocessing.transform(pdata), columns=tcolumns)
-        # Check for viable era
-        if args.era:
-            if not args.era in [2016, 2017, 2018]:
-                logger.fatal("Era must be 2016, 2017 or 2018 but is {}".format(args.era))
-                raise Exception
-            # Append one hot encoded era information to variables
-            # Append as int
-            values_preprocessed["era"] = args.era
-            # Expand to possible values (necessary for next step)
-            values_preprocessed["era"] = values_preprocessed["era"].astype(CategoricalDtype([2016, 2017, 2018]))
-            # Convert to one hot encoding and append
-            values_preprocessed = pd.concat([values_preprocessed, pd.get_dummies(values_preprocessed["era"], prefix="era")], axis=1)
-            # Remove int era column
-            values_preprocessed.drop(["era"], axis=1, inplace=True)
-            ###
-        # Get interference from trained model
-        event_responses = get_values(model, values_preprocessed)
-        # Determine class for each sample
-        max_indexes = np.argmax(event_responses, axis=1)
-        # Sum over weights of samples for each response
-        for i, indexes in enumerate(classes):
-            confusion[i_class, i] += np.sum(flat_weight[max_indexes==i])
-            confusion2[i_class, i] += np.sum(flat_weight[max_indexes==i]*class_weights[class_])
+        # Convert tree to pandas dataframe for variable columns and weight column
+        values_weights = uptree.arrays(expressions=variables+[weights], library="pd")
+        for val_wei in uptree.iterate(expressions=variables+[weights], library="pd", step_size=10000):
+            # Get weights from dataframe
+            flat_weight = val_wei[weights]
+            # Apply preprocessing of training to variables
+            values_preprocessed = pd.DataFrame(data=preprocessing.transform(val_wei[variables]), columns=val_wei[variables].keys())
+            # Check for viable era
+            if args.era:
+                if not args.era in [2016, 2017, 2018]:
+                    logger.fatal("Era must be 2016, 2017 or 2018 but is {}".format(args.era))
+                    raise Exception
+                # Append one hot encoded era information to variables
+                # Append as int
+                values_preprocessed["era"] = args.era
+                # Expand to possible values (necessary for next step)
+                values_preprocessed["era"] = values_preprocessed["era"].astype(CategoricalDtype([2016, 2017, 2018]))
+                # Convert to one hot encoding and append
+                values_preprocessed = pd.concat([values_preprocessed, pd.get_dummies(values_preprocessed["era"], prefix="era")], axis=1)
+                # Remove int era column
+                values_preprocessed.drop(["era"], axis=1, inplace=True)
+                ###
+            # Transform numpy array with samples to tensorflow tensor
+            sample_tensor = tf.convert_to_tensor(values_preprocessed)
+            # Get interference from trained model
+            event_responses = get_values(model, values_preprocessed)
+            # Determine class for each sample
+            max_indexes = np.argmax(event_responses, axis=1)
+            # Sum over weights of samples for each response
+            for i, indexes in enumerate(classes):
+                confusion[i_class, i] += np.sum(flat_weight[max_indexes==i])
+                confusion2[i_class, i] += np.sum(flat_weight[max_indexes==i]*class_weights[class_])
     
     # Debug output to ensure that plotting is correct
     for i_class, class_ in enumerate(config_train["classes"]):

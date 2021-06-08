@@ -159,7 +159,24 @@ def smhtt_dropout_tanh(num_inputs, num_outputs):
     model.add(Dense(num_outputs, kernel_regularizer=l2(1e-5)))
     model.add(Activation("softmax"))
 
-    model.compile(loss="categorical_crossentropy", optimizer=Adam(lr=1e-4), weighted_metrics=["mean_squared_error"])
+    model.compile(loss="categorical_crossentropy", optimizer=Adam(learning_rate=1e-4), weighted_metrics=["mean_squared_error"])
+    return model
+
+def smhtt_dropout_tanh_large(num_inputs, num_outputs):
+    model = Sequential()
+
+    for i, nodes in enumerate([512] * 4):
+        if i == 0:
+            model.add(Dense(nodes, kernel_regularizer=l2(1e-5), input_dim=num_inputs))
+        else:
+            model.add(Dense(nodes, kernel_regularizer=l2(1e-5)))
+        model.add(Activation("tanh"))
+        model.add(Dropout(0.3))
+
+    model.add(Dense(num_outputs, kernel_regularizer=l2(1e-5)))
+    model.add(Activation("softmax"))
+
+    model.compile(loss="categorical_crossentropy", optimizer=Adam(learning_rate=1e-4), weighted_metrics=["mean_squared_error"])
     return model
 
 

@@ -20,6 +20,7 @@ from matplotlib import cm
 
 from tensorflow.keras.models import load_model
 import tensorflow as tf
+import uproot
 import pandas as pd
 from pandas.api.types import CategoricalDtype 
 
@@ -58,7 +59,18 @@ def parse_config(filename):
 
 
 def main(args, config_test, config_train):
-    logger.info("Tensorflow version: {}".format(tf.__version__))
+    logger.info("Using {} from {}".format(tf.__version__, tf.__file__))
+    physical_devices = tf.config.list_physical_devices('GPU')
+    if physical_devices:
+        logger.info("Default GPU Devices: {}".format(physical_devices))
+        try:
+            for device in physical_devices:
+                tf.config.experimental.set_memory_growth(device, True)
+        except:
+            # Invalid device or cannot modify virtual devices once initialized.
+            pass
+    else:
+        logger.info("No GPU found. Using CPU.")
 
     # Load preprocessing
     path = os.path.join(config_train["output_path"],
@@ -91,8 +103,6 @@ def main(args, config_test, config_train):
     # Function to compute gradients of model answers in optimized graph mode    
     @tf.function(experimental_relax_shapes=True)
     def get_gradients(model, samples, output_ind):
-        # Transform numpy array with samples to tensorflow tensor
-        sample_tensor = tf.convert_to_tensor(samples)
         # Define function to get single gradient
         def get_single_gradient(single_sample):
             # (Expand shape of sample for gradient function)
@@ -108,16 +118,20 @@ def main(args, config_test, config_train):
         grads = tf.vectorized_map(get_single_gradient, sample_tensor)
         return grads
 
-
     # Loop over testing dataset
     logger.info("Loop over test dataset %s to get model response.", path)
     file_ = ROOT.TFile(path)
+    upfile = uproot.open(path)
+    variables = config_train["variables"]
+    weights = config_test["weight_branch"]
     mean_abs_deriv = {}
-    for i_class, class_ in enumerate(config_train["classes"]):
+    classes = config_train["classes"]
+    for i_class, class_ in enumerate(classes):
         logger.debug("Current time: {}".format(datetime.now().strftime("%H:%M:%S")))
         logger.debug("Process class %s.", class_)
 
         tree = file_.Get(class_)
+        uptree = upfile[class_]
         if tree == None:
             logger.fatal("Tree %s does not exist.", class_)
             raise Exception
@@ -125,7 +139,9 @@ def main(args, config_test, config_train):
         for friend in friend_trees_names:
             tree.AddFriend(friend)
 
-        variables = config_train["variables"]
+        gradients_intermediate = np.zeros(len(variables)+len(eras))
+        gradients_weights_intermediate = 0
+        
         for variable in variables:
             typename = tree.GetLeaf(variable).GetTypeName()
             if not (typename == "Float_t" or typename == "Int_t"):
@@ -133,43 +149,53 @@ def main(args, config_test, config_train):
                 raise Exception
         if tree.GetLeaf(variable).GetTypeName() != "Float_t":
             logger.fatal(
-                "Weight branch has unkown type: {}".format(tree.GetLeaf(config_test["weight_branch"]).GetTypeName()))
+                "Weight branch has unkown type: {}".format(tree.GetLeaf(weights).GetTypeName()))
             raise Exception
+        
+        # Convert tree to pandas dataframe for variable columns and weight column
+        values_weights = uptree.arrays(expressions=variables+[weights], library="pd")
+        for val_wei in uptree.iterate(expressions=variables+[weights], library="pd", step_size=10000):
+            # Get weights from dataframe
+            flat_weight = val_wei[weights]
+            # Apply preprocessing of training to variables
+            values_preprocessed = pd.DataFrame(data=preprocessing.transform(val_wei[variables]), columns=val_wei[variables].keys())
+            # Check for viable era
+            if args.era:
+                if not args.era in [2016, 2017, 2018]:
+                    logger.fatal("Era must be 2016, 2017 or 2018 but is {}".format(args.era))
+                    raise Exception
+                # Append one hot encoded era information to variables
+                # Append as int
+                values_preprocessed["era"] = args.era
+                # Expand to possible values (necessary for next step)
+                values_preprocessed["era"] = values_preprocessed["era"].astype(CategoricalDtype([2016, 2017, 2018]))
+                # Convert to one hot encoding and append
+                values_preprocessed = pd.concat([values_preprocessed, pd.get_dummies(values_preprocessed["era"], prefix="era")], axis=1)
+                # Remove int era column
+                values_preprocessed.drop(["era"], axis=1, inplace=True)
+                ###
+            # Transform numpy array with samples to tensorflow tensor
+            sample_tensor = tf.convert_to_tensor(values_preprocessed)
+            # Get array of gradients of model wrt. samples 
+            gradients = tf.squeeze(get_gradients(model_keras, sample_tensor, i_class), axis=1)
 
-        # Convert tree to numpy array and labels for variable columns and weight column
-        tdata, tcolumns = tree.AsMatrix(return_labels=True ,columns=variables)
-        wdata, wcolumns = tree.AsMatrix(return_labels=True ,columns=[config_test["weight_branch"]])
-        # Convert numpy array and labels to pandas dataframe for variable columns
-        pdata = pd.DataFrame(data=tdata, columns=tcolumns)
-        # Flatten weight column into 1d array
-        flat_weight = wdata.flatten()
-        # Apply preprocessing of training to variables
-        values_preprocessed = pd.DataFrame(data=preprocessing.transform(pdata), columns=tcolumns)
-        # Check for viable era
-        if args.era:
-            if not args.era in [2016, 2017, 2018]:
-                logger.fatal("Era must be 2016, 2017 or 2018 but is {}".format(args.era))
-                raise Exception
-            # Append one hot encoded era information to variables
-            # Append as int
-            values_preprocessed["era"] = args.era
-            # Expand to possible values (necessary for next step)
-            values_preprocessed["era"] = values_preprocessed["era"].astype(CategoricalDtype([2016, 2017, 2018]))
-            # Convert to one hot encoding and append
-            values_preprocessed = pd.concat([values_preprocessed, pd.get_dummies(values_preprocessed["era"], prefix="era")], axis=1)
-            # Remove int era column
-            values_preprocessed.drop(["era"], axis=1, inplace=True)
-            ###
-        # Get array of gradients of model wrt. samples 
-        gradients = tf.squeeze(get_gradients(model_keras, values_preprocessed, i_class))
-        # Get weighted average of gradients/ abs of gradients
-        if args.no_abs:
-            mean_abs_deriv[class_] = np.average(gradients, weights=flat_weight, axis=0)
-        else:
-            mean_abs_deriv[class_] = np.average(np.abs(gradients), weights=flat_weight, axis=0)
-
+            # Fix dimensions if only one sample remains
+            if len(val_wei)==1:
+                flat_weight = np.array(flat_weight)
+            # Concatenate new gradients/ abs of gradients to previous results
+            if args.no_abs:
+                gradients = np.concatenate(([gradients_intermediate], gradients), axis=0)
+            else:
+                gradients = np.concatenate(([gradients_intermediate], np.abs(gradients)), axis=0)
+            # Concatenate new weights to previous weights
+            gradients_weights = np.concatenate(([gradients_weights_intermediate], flat_weight), axis=0)
+            # Get new itermediate averages and weights
+            gradients_intermediate = np.average(gradients, weights=gradients_weights, axis=0)
+            gradients_weights_intermediate = np.sum(gradients_weights)
+        # Set weighted average for classes
+        mean_abs_deriv[class_] = gradients_intermediate
+        
     # Normalize rows
-    classes = config_train["classes"]
     matrix = np.vstack([mean_abs_deriv[class_] for class_ in classes])
     if args.normalize:
         for i_class, class_ in enumerate(classes):
