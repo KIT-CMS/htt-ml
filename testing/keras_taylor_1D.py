@@ -53,6 +53,11 @@ def parse_arguments():
                         action="store_true",
                         default=False,
                         help="Normalize rows.")
+    parser.add_argument("--Num_Events",
+                        required=False,
+                        type=int,
+                        default=100000,
+                        help="Maximum number of Events in a parallel processed batch")
     return parser.parse_args()
 
 
@@ -163,11 +168,9 @@ def main(args, config_test, config_train):
             raise Exception
 
         # Convert tree to pandas dataframe for variable columns and weight column
-        values_weights = uptree.arrays(expressions=variables + [weights],
-                                       library="pd")
         for val_wei in uptree.iterate(expressions=variables + [weights],
                                       library="pd",
-                                      step_size=10000):
+                                      step_size=args.Num_Events):
             # Get weights from dataframe
             flat_weight = val_wei[weights]
             # Apply preprocessing of training to variables

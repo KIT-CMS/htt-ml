@@ -53,6 +53,11 @@ def parse_arguments():
                         action="store_true",
                         default=False,
                         help="Do not use abs for metric.")
+    parser.add_argument("--Num_Events",
+                        required=False,
+                        type=int,
+                        default=100000,
+                        help="Maximum number of Events in a parallel processed batch")
     return parser.parse_args()
 
 
@@ -110,7 +115,7 @@ def main(args, config_test, config_train):
             deriv_ops_names.append([i_var, j_var])
 
     # Function to compute gradients of model answers in optimized graph mode
-    @tf.function
+    @tf.function(experimental_relax_shapes=True)
     def get_gradients(model, samples, output_ind):
         # Define function to get single gradient
         def get_single_gradient(single_sample):
@@ -129,7 +134,7 @@ def main(args, config_test, config_train):
         return grads
 
     # Function to compute hessian of model answers in optimized graph mode
-    @tf.function
+    @tf.function(experimental_relax_shapes=True)
     def get_hessians(model, sample, output_ind):
         # Define function to get single hessian
         def get_single_hessian(single_sample):
@@ -226,11 +231,9 @@ def main(args, config_test, config_train):
                               length_variables) / 2 + length_variables
 
         # Convert tree to pandas dataframe for variable columns and weight column
-        values_weights = uptree.arrays(expressions=variables + [weights_class],
-                                       library="pd")
         for val_wei in uptree.iterate(expressions=variables + [weights_class],
                                       library="pd",
-                                      step_size=10000):
+                                      step_size=args.Num_Events):
             # Get weights from dataframe
             flat_weight = val_wei[weights_class]
             # Apply preprocessing of training to variables

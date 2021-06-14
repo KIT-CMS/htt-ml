@@ -43,6 +43,11 @@ def parse_arguments():
                         required=False,
                         default=None,
                         help="Era to be tested.")
+    parser.add_argument("--Num_Events",
+                        required=False,
+                        type=int,
+                        default=100000,
+                        help="Maximum number of Events in a parallel processed batch")
     return parser.parse_args()
 
 
@@ -188,13 +193,11 @@ def main(args, config_test, config_train):
             logger.fatal("Weight branch has unkown type: {}".format(
                 tree.GetLeaf(weights).GetTypeName()))
             raise Exception
-
+        print("There are {} entries in this tree.".format(tree.GetEntries()))
         # Convert tree to pandas dataframe for variable columns and weight column
-        values_weights = uptree.arrays(expressions=variables + [weights],
-                                       library="pd")
         for val_wei in uptree.iterate(expressions=variables + [weights],
                                       library="pd",
-                                      step_size=10000):
+                                      step_size=args.Num_Events):
             # Get weights from dataframe
             flat_weight = val_wei[weights]
             # Apply preprocessing of training to variables
@@ -226,7 +229,7 @@ def main(args, config_test, config_train):
             # Transform numpy array with samples to tensorflow tensor
             sample_tensor = tf.convert_to_tensor(values_preprocessed)
             # Get interference from trained model
-            event_responses = get_values(model, values_preprocessed)
+            event_responses = get_values(model, sample_tensor)
             # Determine class for each sample
             max_indexes = np.argmax(event_responses, axis=1)
             # Sum over weights of samples for each response
