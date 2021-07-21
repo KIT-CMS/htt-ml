@@ -14,8 +14,13 @@ def parse_arguments():
     logger.debug("Parse arguments.")
     parser = argparse.ArgumentParser(
         description="Train machine Keras models for Htt analyses")
-    parser.add_argument("config", help="Path to training config file")
-    parser.add_argument("fold", type=int, help="Select the fold to be trained")
+    parser.add_argument('--configs', default=[], nargs='+')
+    parser.add_argument(
+        "--fold",
+        required=True,
+        type=int,
+        help="Select the fold to be trained"
+    )
     parser.add_argument(
         "--conditional",
         required=False,
@@ -55,6 +60,7 @@ def setup_logging(level, output_file=None):
     logger.addHandler(handler)
 
     if not output_file == None:
+        print(output_file)
         file_handler = logging.FileHandler(output_file, "w")
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
@@ -119,180 +125,243 @@ def main(args, config):
         signal_classes = []
         randomization_era = None
 
-    # Perform data transformations on gpu if available
-    if physical_devices:
-        device = '/GPU:0'
-    else:
-        device = '/CPU'
-    with tf.device(device):
-        # Load training dataset
-        if args.conditional:
-            args.balanced_batches = True
-            eras = ['2016', '2017', '2018']
-            len_eras = len(eras)
+    #dict with all era index dicts
+    all_eraIndexDict = {}
+    all_xtrain = {}
+    all_ytrain = {}
+    all_wtrain = {}
+    all_ztrain = {}
+    all_xtest = {}
+    all_ytest = {}
+    all_wtest = {}
+    all_ztest = {}
+    all_configs = args.configs
+    for conf in all_configs:
+        config = parse_config(conf)
+        classes = config["classes"]
+        # Perform data transformations on gpu if available
+        if physical_devices:
+            device = '/GPU:0'
         else:
-            eras = ['any']
-            len_eras = 0
-        x = []  # Training input
-        y = []  # Target classes
-        w = []  # Weights for training
-        z = []  # Era information for batching
-        for i_era, era in enumerate(eras):
+            device = '/CPU'
+        with tf.device(device):
+            # Load training dataset
             if args.conditional:
-                filename = config["datasets_{}".format(era)][args.fold]
+                args.balanced_batches = True
+                eras = ['2016', '2017', '2018']
+                len_eras = len(eras)
             else:
-                filename = config["datasets"][args.fold]
-            logger.debug("Load training dataset from {}.".format(filename))
-            rfile = ROOT.TFile(filename, "READ")
-            x_era = []
-            y_era = []
-            w_era = []
-            for i_class, class_ in enumerate(classes):
-                logger.debug("Process class %s.", class_)
-                tree = rfile.Get(class_)
-                if tree == None:
-                    logger.fatal("Tree %s not found in file %s.", class_,
-                                 filename)
-                    raise Exception
-                friend_trees_names = [
-                    k.GetName() for k in rfile.GetListOfKeys()
-                    if k.GetName().startswith("_".join([class_, "friend"]))
-                ]
-                for friend in friend_trees_names:
-                    tree.AddFriend(friend)
+                eras = ['any']
+                len_eras = 0
 
-                # Get inputs for this class
-
-                x_class = np.zeros(
-                    (tree.GetEntries(), len(variables) + len_eras))
-                x_conv = root_numpy.tree2array(tree, branches=variables)
-                for i_var, var in enumerate(variables):
-                    x_class[:, i_var] = x_conv[var]
-                if np.any(np.isnan(x_class)):
-                    logger.fatal(
-                        "Nan in class {} for era {} in file {} for any of {}".
-                        format(class_, era, filename, variables))
-                    raise Exception
-
-                # One hot encode eras if conditional. Additionally randomize signal class eras if desired.
+            x = []  # Training input
+            y = []  # Target classes
+            w = []  # Weights for training
+            z = []  # Era information for batching
+            for i_era, era in enumerate(eras):
                 if args.conditional:
-                    if (class_ in signal_classes) and args.randomization:
-                        logger.debug("Randomizing class {}".format(class_))
-                        random_era = np.zeros((tree.GetEntries(), len_eras))
-                        for event in random_era:
-                            idx = np.random.randint(3, size=1)
-                            event[idx] = 1
-                        x_class[:, -3:] = random_era
-                    else:
-                        if era == "2016":
-                            x_class[:, -3] = np.ones((tree.GetEntries()))
-                        elif era == "2017":
-                            x_class[:, -2] = np.ones((tree.GetEntries()))
-                        elif era == "2018":
-                            x_class[:, -1] = np.ones((tree.GetEntries()))
-                x_era.append(x_class)
-
-                # Get weights
-                w_class = np.zeros((tree.GetEntries(), 1))
-                w_conv = root_numpy.tree2array(
-                    tree, branches=[config["event_weights"]])
-                if args.balance_batches:
-                    w_class[:, 0] = w_conv[config["event_weights"]]
+                    filename = config["datasets_{}".format(era)][args.fold]
                 else:
-                    if args.conditional:
-                        w_class[:,
-                                0] = w_conv[config["event_weights"]] * config[
-                                    "class_weights_{}".format(era)][class_]
-                    else:
-                        w_class[:, 0] = w_conv[config[
-                            "event_weights"]] * config["class_weights"][class_]
-                if np.any(np.isnan(w_class)):
-                    logger.fatal(
-                        "Nan in weight class {} for era {} in file {}.".format(
-                            class_, era, filename))
-                    raise Exception
-                w_era.append(w_class)
+                    filename = config["datasets"][args.fold]
+                logger.debug("Load training dataset from {}.".format(filename))
+                rfile = ROOT.TFile(filename, "READ")
+                x_era = []
+                y_era = []
+                w_era = []
+               # print(config)
+                for i_class, class_ in enumerate(classes):
+                    logger.debug("Process class %s.", class_)
+                    tree = rfile.Get(class_)
+                    if tree == None:
+                        logger.fatal("Tree %s not found in file %s.", class_,
+                                    filename)
+                        raise Exception
+                    friend_trees_names = [
+                        k.GetName() for k in rfile.GetListOfKeys()
+                        if k.GetName().startswith("_".join([class_, "friend"]))
+                    ]
+                    for friend in friend_trees_names:
+                        tree.AddFriend(friend)
 
-                # Get targets for this class
-                y_class = np.zeros((tree.GetEntries(), len(classes)))
-                y_class[:, i_class] = np.ones((tree.GetEntries()))
-                y_era.append(y_class)
+                    # Get inputs for this class
+
+                    x_class = np.zeros(
+                        (tree.GetEntries(), len(variables) + len_eras))
+                    x_conv = root_numpy.tree2array(tree, branches=variables)
+                    for i_var, var in enumerate(variables):
+                        x_class[:, i_var] = x_conv[var]
+                    if np.any(np.isnan(x_class)):
+                        logger.fatal(
+                            "Nan in class {} for era {} in file {} for any of {}".
+                            format(class_, era, filename, variables))
+                        raise Exception
+
+                    # One hot encode eras if conditional. Additionally randomize signal class eras if desired.
+                    if args.conditional:
+                        if (class_ in signal_classes) and args.randomization:
+                            logger.debug("Randomizing class {}".format(class_))
+                            random_era = np.zeros((tree.GetEntries(), len_eras))
+                            for event in random_era:
+                                idx = np.random.randint(3, size=1)
+                                event[idx] = 1
+                            x_class[:, -3:] = random_era
+                        else:
+                            if era == "2016":
+                                x_class[:, -3] = np.ones((tree.GetEntries()))
+                            elif era == "2017":
+                                x_class[:, -2] = np.ones((tree.GetEntries()))
+                            elif era == "2018":
+                                x_class[:, -1] = np.ones((tree.GetEntries()))
+
+                    x_era.append(x_class)
+
+                    # Get weights
+                    w_class = np.zeros((tree.GetEntries(), 1))
+                    w_conv = root_numpy.tree2array(
+                        tree, branches=[config["event_weights"]])
+                    if args.balance_batches:
+                        w_class[:, 0] = w_conv[config["event_weights"]]
+                    else:
+                        if args.conditional:
+                            w_class[:,
+                                    0] = w_conv[config["event_weights"]] * config[
+                                        "class_weights_{}".format(era)][class_]
+                        else:
+                            w_class[:, 0] = w_conv[config[
+                                "event_weights"]] * config["class_weights"][class_]
+                    if np.any(np.isnan(w_class)):
+                        logger.fatal(
+                            "Nan in weight class {} for era {} in file {}.".format(
+                                class_, era, filename))
+                        raise Exception
+                    w_era.append(w_class)
+
+                    # Get targets for this class
+                    y_class = np.zeros((tree.GetEntries(), len(classes)))
+                    y_class[:, i_class] = np.ones((tree.GetEntries()))
+                    y_era.append(y_class)
+
+                # Stack inputs, targets and weights to a Keras-readable dataset
+                x_era = np.vstack(x_era)  # inputs
+                y_era = np.vstack(y_era)  # targets
+                w_era = np.vstack(w_era)  # weights
+                z_era = np.zeros((y_era.shape[0], len(eras)))  # era information
+                z_era[:, i_era] = np.ones((y_era.shape[0]))
+                x.append(x_era)
+                y.append(y_era)
+                w.append(w_era)
+                z.append(z_era)
 
             # Stack inputs, targets and weights to a Keras-readable dataset
-            x_era = np.vstack(x_era)  # inputs
-            y_era = np.vstack(y_era)  # targets
-            w_era = np.vstack(w_era)  # weights
-            z_era = np.zeros((y_era.shape[0], len(eras)))  # era information
-            z_era[:, i_era] = np.ones((y_era.shape[0]))
-            x.append(x_era)
-            y.append(y_era)
-            w.append(w_era)
-            z.append(z_era)
+            x = np.vstack(x)  # inputs
+            y = np.vstack(y)  # targets
+            w = np.vstack(w)  # weights
+            w = np.squeeze(w)  # needed to get weights into keras
+            z = np.vstack(z)  # era information
 
-        # Stack inputs, targets and weights to a Keras-readable dataset
-        x = np.vstack(x)  # inputs
-        y = np.vstack(y)  # targets
-        w = np.vstack(w)  # weights
-        w = np.squeeze(w)  # needed to get weights into keras
-        z = np.vstack(z)  # era information
+            # Perform input variable transformation and pickle scaler object.
+            # Only perform transformation on continuous variables
+            x_scaler = x[:, :len(variables)]
+            logger.info("Use preprocessing method %s.", config["preprocessing"])
+            if "standard_scaler" in config["preprocessing"]:
+                scaler = preprocessing.StandardScaler().fit(x_scaler)
+                for var, mean, std in zip(variables, scaler.mean_, scaler.scale_):
+                    logger.debug("Preprocessing (variable, mean, std): %s, %s, %s",
+                                var, mean, std)
+            elif "identity" in config["preprocessing"]:
+                scaler = preprocessing.StandardScaler().fit(x_scaler)
+                for i in range(len(scaler.mean_)):
+                    scaler.mean_[i] = 0.0
+                    scaler.scale_[i] = 1.0
+                for var, mean, std in zip(variables, scaler.mean_, scaler.scale_):
+                    logger.debug("Preprocessing (variable, mean, std): %s, %s, %s",
+                                var, mean, std)
+            elif "robust_scaler" in config["preprocessing"]:
+                scaler = preprocessing.RobustScaler().fit(x_scaler)
+                for var, mean, std in zip(variables, scaler.center_,
+                                        scaler.scale_):
+                    logger.debug("Preprocessing (variable, mean, std): %s, %s, %s",
+                                var, mean, std)
+            elif "min_max_scaler" in config["preprocessing"]:
+                scaler = preprocessing.MinMaxScaler(
+                    feature_range=(-1.0, 1.0)).fit(x_scaler)
+                for var, min_, max_ in zip(variables, scaler.data_min_,
+                                        scaler.data_max_):
+                    logger.debug("Preprocessing (variable, min, max): %s, %s, %s",
+                                var, min_, max_)
+            elif "quantile_transformer" in config["preprocessing"]:
+                scaler = preprocessing.QuantileTransformer(
+                    output_distribution="normal",
+                    random_state=int(config["seed"])).fit(x_scaler)
+            else:
+                logger.fatal("Preprocessing %s is not implemented.",
+                            config["preprocessing"])
+                raise Exception
+            x[:, :len(variables)] = scaler.transform(x_scaler)
 
-        # Perform input variable transformation and pickle scaler object.
-        # Only perform transformation on continuous variables
-        x_scaler = x[:, :len(variables)]
-        logger.info("Use preprocessing method %s.", config["preprocessing"])
-        if "standard_scaler" in config["preprocessing"]:
-            scaler = preprocessing.StandardScaler().fit(x_scaler)
-            for var, mean, std in zip(variables, scaler.mean_, scaler.scale_):
-                logger.debug("Preprocessing (variable, mean, std): %s, %s, %s",
-                             var, mean, std)
-        elif "identity" in config["preprocessing"]:
-            scaler = preprocessing.StandardScaler().fit(x_scaler)
-            for i in range(len(scaler.mean_)):
-                scaler.mean_[i] = 0.0
-                scaler.scale_[i] = 1.0
-            for var, mean, std in zip(variables, scaler.mean_, scaler.scale_):
-                logger.debug("Preprocessing (variable, mean, std): %s, %s, %s",
-                             var, mean, std)
-        elif "robust_scaler" in config["preprocessing"]:
-            scaler = preprocessing.RobustScaler().fit(x_scaler)
-            for var, mean, std in zip(variables, scaler.center_,
-                                      scaler.scale_):
-                logger.debug("Preprocessing (variable, mean, std): %s, %s, %s",
-                             var, mean, std)
-        elif "min_max_scaler" in config["preprocessing"]:
-            scaler = preprocessing.MinMaxScaler(
-                feature_range=(-1.0, 1.0)).fit(x_scaler)
-            for var, min_, max_ in zip(variables, scaler.data_min_,
-                                       scaler.data_max_):
-                logger.debug("Preprocessing (variable, min, max): %s, %s, %s",
-                             var, min_, max_)
-        elif "quantile_transformer" in config["preprocessing"]:
-            scaler = preprocessing.QuantileTransformer(
-                output_distribution="normal",
-                random_state=int(config["seed"])).fit(x_scaler)
+            path_preprocessing = os.path.join(
+                config["output_path"],
+                "fold{}_keras_preprocessing.pickle".format(args.fold))
+            logger.info("Write preprocessing object to %s.", path_preprocessing)
+            pickle.dump(scaler, open(path_preprocessing, 'wb'))
+
+            # Split data in training and testing
+            x_train, x_test, y_train, y_test, w_train, w_test, z_train, z_test = model_selection.train_test_split(
+                x,
+                y,
+                w,
+                z,
+                test_size=1.0 - config["train_test_split"],
+                random_state=int(config["seed"]))
+            del x, y, w
+
+        classIndexDict = {
+            label: np.where(y_train[:, i_class] == 1)[0]
+            for i_class, label in enumerate(classes)
+        }
+        if "steps_per_epoch" in config["model"]:
+            steps_per_epoch = int(config["model"]["steps_per_epoch"]) * len(eras)
+            eventsPerClassAndBatch = int(config["model"]["eventsPerClassAndBatch"])
+            recommend_steps_per_epoch = int(
+                min([len(classIndexDict[class_])
+                    for class_ in classes]) / (eventsPerClassAndBatch)) + 1
+            logger.info(
+                "steps_per_epoch: Using {} instead of recommended minimum of {}".
+                format(str(steps_per_epoch), str(recommend_steps_per_epoch)))
         else:
-            logger.fatal("Preprocessing %s is not implemented.",
-                         config["preprocessing"])
+            logger.info("model: steps_per_epoch: Not found in {} ".format(
+                args.config))
             raise Exception
-        x[:, :len(variables)] = scaler.transform(x_scaler)
 
-        path_preprocessing = os.path.join(
-            config["output_path"],
-            "fold{}_keras_preprocessing.pickle".format(args.fold))
-        logger.info("Write preprocessing object to %s.", path_preprocessing)
-        pickle.dump(scaler, open(path_preprocessing, 'wb'))
 
-        # Split data in training and testing
-        x_train, x_test, y_train, y_test, w_train, w_test, z_train, z_test = model_selection.train_test_split(
-            x,
-            y,
-            w,
-            z,
-            test_size=1.0 - config["train_test_split"],
-            random_state=int(config["seed"]))
-        del x, y, w
+        logger.info("Running on balanced batches.")
+        # Loop over all eras and classes to divide the batch equally, defines the indices of the corrects answers for each era/class combination
+        eraIndexDict = {
+            era: {
+                label: np.where((z_train[:, i_era] == 1)
+                                & (y_train[:, i_class] == 1))[0]
+                for i_class, label in enumerate(classes)
+            }
+            for i_era, era in enumerate(eras)
+        }
+        all_eraIndexDict[conf] = eraIndexDict
+        all_xtrain[conf] = x_train
+        all_ytrain[conf] = y_train
+        all_wtrain[conf] = w_train
+        all_ztrain[conf] = z_train
+        all_xtest[conf] = x_test
+        all_ytest[conf] = y_test
+        all_wtest[conf] = w_test
+        all_ztest[conf] = z_test
+        classIndexDict = {}
+        eraIndexDict = {}
+
+    import threading
+
     # Add callbacks
     callbacks = []
+    print(config["output_path"])
+    logger.info("for callbacks, used config is: %s", config["output_path"])
     if "early_stopping" in config["model"]:
         logger.info("Stop early after %s tries.",
                     config["model"]["early_stopping"])
@@ -305,8 +374,8 @@ def main(args, config):
                     profile_batch="2, {}".format(
                         config["model"]["steps_per_epoch"])))
 
-    path_model = os.path.join(config["output_path"],
-                              "fold{}_keras_model.h5".format(args.fold))
+    path_model = os.path.join(config["training_path"],
+                            "fold{}_keras_model.h5".format(args.fold))
     if os.path.exists(path_model):
         print("Path {} already exists! I will not overwrite it".format(
             path_model))
@@ -322,7 +391,7 @@ def main(args, config):
                     config["model"]["reduce_lr_on_plateau"])
         callbacks.append(
             ReduceLROnPlateau(patience=config["model"]["reduce_lr_on_plateau"],
-                              verbose=1))
+                            verbose=1))
 
     # Train model
     if not hasattr(keras_models, config["model"]["name"]):
@@ -335,53 +404,32 @@ def main(args, config):
     else:
         eventsPerClassAndBatch = config["model"]["eventsPerClassAndBatch"]
 
-    ###
-    classIndexDict = {
-        label: np.where(y_train[:, i_class] == 1)[0]
-        for i_class, label in enumerate(classes)
-    }
-    if "steps_per_epoch" in config["model"]:
-        steps_per_epoch = int(config["model"]["steps_per_epoch"]) * len(eras)
-        recommend_steps_per_epoch = int(
-            min([len(classIndexDict[class_])
-                 for class_ in classes]) / (eventsPerClassAndBatch)) + 1
-        logger.info(
-            "steps_per_epoch: Using {} instead of recommended minimum of {}".
-            format(str(steps_per_epoch), str(recommend_steps_per_epoch)))
-    else:
-        logger.info("model: steps_per_epoch: Not found in {} ".format(
-            args.config))
-        raise Exception
-
     model_impl = getattr(keras_models, config["model"]["name"])
     model = model_impl(len(variables) + len_eras, len(classes))
     model.summary()
-    if (args.balance_batches):
-        logger.info("Running on balanced batches.")
-        # Loop over all eras and classes to divide the batch equally, defines the indices of the corrects answers for each era/class combination
-        eraIndexDict = {
-            era: {
-                label: np.where((z_train[:, i_era] == 1)
-                                & (y_train[:, i_class] == 1))[0]
-                for i_class, label in enumerate(classes)
-            }
-            for i_era, era in enumerate(eras)
-        }
-        import threading
+    # Sequence to generate data batches
+    class balancedBatchGenerator:
+        def __init__(self):
+            self.eventsPerClassAndBatch = eventsPerClassAndBatch
+            self.lock = threading.Lock()
 
-        # Sequence to generate data batches
-        class balancedBatchGenerator:
-            def __init__(self):
-                self.eventsPerClassAndBatch = eventsPerClassAndBatch
-                self.lock = threading.Lock()
+        def __iter__(self):
+            return self
 
-            def __iter__(self):
-                return self
-
-            def __next__(self):
-                with self.lock:
-                    nperClass = int(eventsPerClassAndBatch)
-                    # Choose eventsPerClassAndBatch events randomly for each class and era
+        def __next__(self):
+            with self.lock:
+                nperClass = int(eventsPerClassAndBatch)
+                # Choose eventsPerClassAndBatch events randomly for each class and era
+                x_all_collect = []
+                y_all_collect = []
+                w_all_collect = []
+                for key in args.configs:
+                    config = parse_config(key)
+                    classes = config["classes"]
+                    eraIndexDict = all_eraIndexDict[key]
+                    x_train_temp = all_xtrain[key]
+                    y_train_temp = all_ytrain[key]
+                    w_train_temp = all_wtrain[key]
                     selIdxDict = {
                         era: {
                             label: eraIndexDict[era][label][np.random.randint(
@@ -391,23 +439,47 @@ def main(args, config):
                         for era in eras
                     }
                     y_collect = np.concatenate([
-                        y_train[selIdxDict[era][label]] for label in classes
+                        y_train_temp[selIdxDict[era][label]] for label in classes
                         for era in eras
                     ])
                     x_collect = np.concatenate([
-                        x_train[selIdxDict[era][label], :] for label in classes
+                        x_train_temp[selIdxDict[era][label], :] for label in classes
                         for era in eras
                     ])
                     w_collect = np.concatenate([
-                        w_train[selIdxDict[era][label]] *
+                        w_train_temp[selIdxDict[era][label]] *
                         (eventsPerClassAndBatch /
-                         np.sum(w_train[selIdxDict[era][label]]))
+                            np.sum(w_train_temp[selIdxDict[era][label]]))
                         for label in classes for era in eras
                     ])
-                    # return list of choosen values
-                    return x_collect, y_collect, w_collect
+                    x_all_collect.append(x_collect)
+                    y_all_collect.append(y_collect)
+                    w_all_collect.append(w_collect)
 
-        def calculateValidationWeights(x_test, y_test, w_test):
+                # return list of choosen values
+                return tuple(x_all_collect), tuple(y_all_collect), tuple(w_all_collect)
+
+#hier noch zufällig events aus signal rauswerfen, sodass alle val sets gleich groß sind
+    def calculateValidationWeights():
+        x_all_collect = []
+        y_all_collect = []
+        w_all_collect = []
+        len_signal = np.zeros(len(args.configs))
+        for i_key,key in enumerate(args.configs):
+            x_test = all_xtest[key]
+            len_signal[i_key] = len(x_test)
+        diff = len_signal-np.min(len_signal)
+        for i_key,key in enumerate(args.configs):            
+            x_test = all_xtest[key]
+            y_test = all_ytest[key]
+            w_test = all_wtest[key]
+            z_test = all_ztest[key]
+            sigs = np.where(all_ytest[key][:,4]==1.)            
+            del_idx = np.random.choice(sigs[0], int(diff[i_key]),replace=False)
+            x_test = np.delete(x_test, del_idx,0)
+            y_test = np.delete(y_test, del_idx,0)
+            w_test = np.delete(w_test, del_idx)
+            z_test = np.delete(z_test, del_idx,0)
             testIndexDict = {
                 era: {
                     label: np.where((z_test[:, i_era] == 1)
@@ -430,84 +502,50 @@ def main(args, config):
                 (len(x_test) / np.sum(w_test[testIndexDict[era][class_]]))
                 for class_ in classes for era in eras
             ])
+            x_all_collect.append(x_collect)
+            y_all_collect.append(y_collect)
+            w_all_collect.append(w_collect)
+        yield tuple(x_all_collect),tuple(y_all_collect), tuple(w_all_collect)
 
-            return x_collect, y_collect, w_collect
+    types = ((tf.float32,tf.float32),
+                (tf.float32,tf.float32),
+                (tf.float32,tf.float32))
+    shapes = (([None,len(variables) + len_eras],[None,len(variables) + len_eras]),
+                ([None,5],[None,5]),
+                ([None],[None]))
+    validata = tf.data.Dataset.from_generator(
+             calculateValidationWeights,
+             output_types=types,
+             output_shapes=shapes)
+    traindata = tf.data.Dataset.from_generator(
+             balancedBatchGenerator,
+             output_types=types,
+             output_shapes=shapes)
 
-        x_test, y_test, w_test = calculateValidationWeights(
-            x_test, y_test, w_test)
-
-        # define tf.data.Dataset for input generator data
-        traindata = tf.data.Dataset.from_generator(
-            balancedBatchGenerator,
-            output_signature=(tf.TensorSpec(
-                shape=(eventsPerClassAndBatch * len(classes) *
-                       max(1, len(eras)), len(variables) + len_eras),
-                dtype=tf.float64),
-                              tf.TensorSpec(
-                                  shape=(eventsPerClassAndBatch *
-                                         len(classes) * max(1, len(eras)),
-                                         len(classes)),
-                                  dtype=tf.float64),
-                              tf.TensorSpec(
-                                  shape=(eventsPerClassAndBatch *
-                                         len(classes) * max(1, len(eras))),
-                                  dtype=tf.float64)))
-        # define tf.data.Dataset for validation data
-        validata = tf.data.Dataset.from_tensor_slices((x_test, y_test, w_test))
-        # collect all data into single batch
-        validata = validata.batch(len(x_test))
-        # Prefetch datasets to CPU or GPU if available
-        if physical_devices:
-            traindata = traindata.apply(
-                tf.data.experimental.prefetch_to_device(
-                    tf.test.gpu_device_name(), tf.data.experimental.AUTOTUNE))
-            validata = validata.apply(
-                tf.data.experimental.prefetch_to_device(
-                    tf.test.gpu_device_name(), tf.data.experimental.AUTOTUNE))
-        else:
-            traindata = traindata.prefetch(tf.data.experimental.AUTOTUNE)
-            validata = validata.prefetch(tf.data.experimental.AUTOTUNE)
-
-        print("Timestamp training start: {}".format(
-            datetime.now().strftime("%H:%M:%S")))
-        # Train model with prefetched datasets
-        history = model.fit(traindata,
-                            steps_per_epoch=steps_per_epoch,
-                            epochs=config["model"]["epochs"],
-                            callbacks=callbacks,
-                            validation_data=validata,
-                            verbose=2)
-
+    #Prefetch datasets to CPU or GPU if available
+    if physical_devices:
+        traindata = traindata.apply(
+            tf.data.experimental.prefetch_to_device(
+                tf.test.gpu_device_name(), tf.data.experimental.AUTOTUNE))
+        validata = validata.apply(
+            tf.data.experimental.prefetch_to_device(
+                tf.test.gpu_device_name(), tf.data.experimental.AUTOTUNE))
     else:
-        with tf.device(device):
-            traindata = tf.data.Dataset.from_tensor_slices(
-                (x_train, y_train, w_train))
-            traindata = traindata.batch(eventsPerClassAndBatch * len(classes))
-            validata = tf.data.Dataset.from_tensor_slices(
-                (x_test, y_test, w_test))
-            validata = validata.batch(len(x_test))
-            if physical_devices:
-                traindata = traindata.apply(
-                    tf.data.experimental.prefetch_to_device(
-                        tf.test.gpu_device_name(),
-                        tf.data.experimental.AUTOTUNE))
-                validata = validata.apply(
-                    tf.data.experimental.prefetch_to_device(
-                        tf.test.gpu_device_name(),
-                        tf.data.experimental.AUTOTUNE))
-            else:
-                traindata = traindata.prefetch(tf.data.experimental.AUTOTUNE)
-                validata = validata.prefetch(tf.data.experimental.AUTOTUNE)
+        traindata = traindata.prefetch(tf.data.experimental.AUTOTUNE)
+        validata = validata.prefetch(tf.data.experimental.AUTOTUNE)
 
-        from datetime import datetime
-        logger.info("Timestamp training start: {}".format(
-            datetime.now().strftime("%H:%M:%S")))
-        history = model.fit(traindata,
-                            validation_data=validata,
-                            epochs=config["model"]["epochs"],
-                            shuffle=True,
-                            callbacks=callbacks,
-                            verbose=2)
+    print("Timestamp training start: {}".format(
+        datetime.now().strftime("%H:%M:%S")))
+
+    # Train model with prefetched datasets
+    history = model.fit(traindata,
+                        steps_per_epoch=steps_per_epoch,
+                        epochs=config["model"]["epochs"],
+                        callbacks=callbacks,
+                        validation_data=validata,
+                        max_queue_size=10,
+                        workers=5,
+                        verbose=2)
 
     logger.info("Timestamp training end: {}".format(
         datetime.now().strftime("%H:%M:%S")))
@@ -519,7 +557,7 @@ def main(args, config):
              lw=3,
              label="Validation loss")
     plt.xlabel("Epoch"), plt.ylabel("Loss")
-    path_plot = os.path.join(config["output_path"],
+    path_plot = os.path.join(config["training_path"],
                              "fold{}_loss".format(args.fold))
     plt.legend()
     plt.savefig(path_plot + ".png", bbox_inches="tight")
@@ -533,7 +571,8 @@ def main(args, config):
 
 if __name__ == "__main__":
     args = parse_arguments()
-    config = parse_config(args.config)
+    print(args)
+    config = parse_config(args.configs[0])
     setup_logging(logging.INFO,
-                  "{}/training{}.log".format(config["output_path"], args.fold))
+                  "{}/training{}.log".format(config["training_path"], args.fold))
     main(args, config)

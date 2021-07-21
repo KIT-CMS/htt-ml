@@ -4,7 +4,37 @@ from tensorflow.keras.layers import *
 from tensorflow.keras.optimizers import *
 from tensorflow.keras.regularizers import l2
 import numpy as np
+from tensorflow import keras
+def functional(num_inputs, num_outputs):
+    inputs1 =  keras.Input(shape=(num_inputs,))
+    inputs2 =  keras.Input(shape=(num_inputs,))
+    dense1 = keras.layers.Dense(200,activation='tanh',kernel_regularizer=l2(1e-5))
+    dense2 = keras.layers.Dense(200,activation='tanh',kernel_regularizer=l2(1e-5))
+    dense3 = keras.layers.Dense(200,activation='tanh',kernel_regularizer=l2(1e-5))
+    dense4 = keras.layers.Dense(200,activation='tanh',kernel_regularizer=l2(1e-5))
+    dense5 = keras.layers.Dense(num_outputs,activation='softmax',kernel_regularizer=l2(1e-5))
+    dense6 = keras.layers.Dense(num_outputs,activation='softmax',kernel_regularizer=l2(1e-5))
+    x1 = dense1(inputs1)
+    x2 = dense2(inputs2)
+    x1 = Dropout(0.3)(x1)
+    x2 = Dropout(0.3)(x2)
+    x1 = dense3(x1)
+    x2 = dense4(x2)
+    x1 = Dropout(0.3)(x1)
+    x2 = Dropout(0.3)(x2)
+    #x3 = keras.layers.concatenate([x1,x2])
+    output1 = dense5(x1)
+    output2 = dense6(x2)
 
+    model = keras.Model(inputs=[inputs1,inputs2], outputs=[output1,output2])
+
+    #keras.utils.plot_model(model, 'func_api2.png', show_shapes=True)
+    model.compile(loss=["categorical_crossentropy","categorical_crossentropy"],
+                    optimizer=Adam(learning_rate=1e-4),
+                    weighted_metrics=["mean_squared_error","mean_squared_error"])
+                
+
+    return model
 
 def example(num_inputs, num_outputs):
     """
