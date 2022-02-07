@@ -20,6 +20,12 @@ formatter = logging.Formatter("%(name)s - %(levelname)s - %(message)s")
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
+# function to return a random value of an input list
+ROOT.gInterpreter.Declare("""
+            float pickMassUni(std::vector<int> x, int length) {
+            return x.at(int(gRandom->Uniform(length)));
+            }
+          """)
 
 def parse_arguments():
     logger.debug("Parse arguments.")
@@ -116,6 +122,29 @@ def generateRootFiles(jobconfig):
         config["training_weight_branch"],
         "(float)(" + config["processes"][process]["weight_string"] + ")",
     )
+
+    #load nmssm mass dict
+    mass_dict = yaml.load(open("ml/mass_dict_nmssm.yaml"), Loader=yaml.Loader)
+
+    #create list for all necessary light masses
+    light_masses=[]
+    
+    for light_mass in mass_dict["light_mass_fine"]:
+        if light_mass+125<mass_dict["heavy_mass"][0]:
+            light_masses.append(light_mass)
+    
+    #create new branch with the respective light mass for NMSSM processes and a random light mass for background processes from the light_masses list
+    
+    if "NMSSM" in process:
+        masses=process.split("_")
+        heavy_mass=float(masses[1])
+        light_mass=float(masses[3])
+        rdf = rdf.Define(
+            "NMSSM_light_mass",
+            "(float)({light_mass})".format(light_mass=light_mass),
+        )
+    else:        
+        rdf=rdf.Define("NMSSM_light_mass", "(float)(pickMassUni({{{masses}}}, {len}))".format(masses=",".join(map(str, light_masses)), len=len(light_masses)))
 
     opt = ROOT.ROOT.RDF.RSnapshotOptions()
     opt.fMode = "RECREATE"
