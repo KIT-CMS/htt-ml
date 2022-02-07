@@ -356,13 +356,20 @@ def main(args, config):
     model_impl = getattr(keras_models, config["model"]["name"])
     model = model_impl(len(variables) + len_eras, len(classes))
     model.summary()
+    light_masses=np.unique(np.around(x_train[:, -4],3))
+    print("hey")
+    print(len(light_masses))
     if (args.balance_batches):
         logger.info("Running on balanced batches.")
-        # Loop over all eras and classes to divide the batch equally, defines the indices of the corrects answers for each era/class combination
+        # Loop over all eras, classes and light masses to divide the batch equally, defines the indices of the corrects answers for each era/class combination
         eraIndexDict = {
             era: {
-                label: np.where((z_train[:, i_era] == 1)
-                                & (y_train[:, i_class] == 1))[0]
+                label: {
+                        light_mass: np.where((z_train[:, i_era] == 1)
+                                & (y_train[:, i_class] == 1)
+                                & (np.around(x_train[:, -4],3) == light_mass))[0]
+                        for light_mass in light_masses
+                }
                 for i_class, label in enumerate(classes)
             }
             for i_era, era in enumerate(eras)
@@ -381,56 +388,81 @@ def main(args, config):
             def __next__(self):
                 with self.lock:
                     nperClass = int(eventsPerClassAndBatch)
-                    # Choose eventsPerClassAndBatch events randomly for each class and era
+                    # Choose eventsPerClassAndBatch events randomly for each class, era and light mass
                     selIdxDict = {
                         era: {
-                            label: eraIndexDict[era][label][np.random.randint(
-                                0, len(eraIndexDict[era][label]), nperClass)]
+                            label: {
+                                light_mass: eraIndexDict[era][label][light_mass][np.random.randint(
+                                0, len(eraIndexDict[era][label][light_mass]), nperClass)] 
+                                for light_mass in light_masses
+                                if len(eraIndexDict[era][label][light_mass]) > 0
+                            }
                             for label in classes
                         }
                         for era in eras
                     }
                     y_collect = np.concatenate([
-                        y_train[selIdxDict[era][label]] for label in classes
+                        y_train[selIdxDict[era][label][light_mass]] 
+                        for light_mass in light_masses 
+                        for label in classes
                         for era in eras
+                        #if len(eraIndexDict[era][label][light_mass]) > 0
                     ])
                     x_collect = np.concatenate([
-                        x_train[selIdxDict[era][label], :] for label in classes
+                        x_train[selIdxDict[era][label][light_mass], :] 
+                        for light_mass in light_masses 
+                        for label in classes
                         for era in eras
+                       # if len(eraIndexDict[era][label][light_mass]) > 0
                     ])
                     w_collect = np.concatenate([
-                        w_train[selIdxDict[era][label]] *
-                        (eventsPerClassAndBatch /
-                         np.sum(w_train[selIdxDict[era][label]]))
-                        for label in classes for era in eras
-                    ])
+                            w_train[selIdxDict[era][label][light_mass]] *
+                            (eventsPerClassAndBatch / np.sum(w_train[selIdxDict[era][label][light_mass]]))
+                            for light_mass in light_masses 
+                            for label in classes 
+                            for era in eras
+                            #if len(eraIndexDict[era][label][light_mass]) > 0
+                        ])
                     # return list of choosen values
                     return x_collect, y_collect, w_collect
 
         def calculateValidationWeights(x_test, y_test, w_test):
             testIndexDict = {
                 era: {
-                    label: np.where((z_test[:, i_era] == 1)
-                                    & (y_test[:, i_class] == 1))[0]
+                    label: {
+                        light_mass: np.where((z_test[:, i_era] == 1)
+                                    & (y_test[:, i_class] == 1)
+                                    & (np.around(x_test[:, -4],3) == light_mass))[0]
+                        for light_mass in light_masses
+                    }
                     for i_class, label in enumerate(classes)
                 }
                 for i_era, era in enumerate(eras)
             }
 
             y_collect = np.concatenate([
-                y_test[testIndexDict[era][label]] for label in classes
+                y_test[testIndexDict[era][label][light_mass]] 
+                for light_mass in light_masses
+                for label in classes
                 for era in eras
+                if len(w_test[testIndexDict[era][class_][light_mass]]) > 0
             ])
             x_collect = np.concatenate([
-                x_test[testIndexDict[era][label], :] for label in classes
+                x_test[testIndexDict[era][label][light_mass], :]                  
+                for light_mass in light_masses 
+                for label in classes
                 for era in eras
-            ])
-            w_collect = np.concatenate([
-                w_test[testIndexDict[era][class_]] *
-                (len(x_test) / np.sum(w_test[testIndexDict[era][class_]]))
-                for class_ in classes for era in eras
+                if len(w_test[testIndexDict[era][class_][light_mass]]) > 0
             ])
 
+            w_collect = np.concatenate([
+                w_test[testIndexDict[era][class_][light_mass]] *
+                (len(x_test) / np.sum(w_test[testIndexDict[era][class_][light_mass]]))
+                for light_mass in light_masses 
+                for class_ in classes 
+                for era in eras 
+                if len(w_test[testIndexDict[era][class_][light_mass]]) > 0
+            ])
             return x_collect, y_collect, w_collect
 
         x_test, y_test, w_test = calculateValidationWeights(
@@ -441,19 +473,21 @@ def main(args, config):
             balancedBatchGenerator,
             output_signature=(tf.TensorSpec(
                 shape=(eventsPerClassAndBatch * len(classes) *
-                       max(1, len(eras)), len(variables) + len_eras),
+                       max(1, len(eras)) * len(light_masses), len(variables) + len_eras),
                 dtype=tf.float64),
                               tf.TensorSpec(
                                   shape=(eventsPerClassAndBatch *
-                                         len(classes) * max(1, len(eras)),
+                                         len(classes) * max(1, len(eras)) * len(light_masses),
                                          len(classes)),
                                   dtype=tf.float64),
                               tf.TensorSpec(
                                   shape=(eventsPerClassAndBatch *
-                                         len(classes) * max(1, len(eras))),
+                                         len(classes) * max(1, len(eras))) * len(light_masses),
                                   dtype=tf.float64)))
+        print(traindata)
         # define tf.data.Dataset for validation data
         validata = tf.data.Dataset.from_tensor_slices((x_test, y_test, w_test))
+        print(validata)
         # collect all data into single batch
         validata = validata.batch(len(x_test))
         # Prefetch datasets to CPU or GPU if available
@@ -482,7 +516,7 @@ def main(args, config):
         with tf.device(device):
             traindata = tf.data.Dataset.from_tensor_slices(
                 (x_train, y_train, w_train))
-            traindata = traindata.batch(eventsPerClassAndBatch * len(classes))
+            traindata = traindata.batch(eventsPerClassAndBatch * len(classes)*len(light_masses))
             validata = tf.data.Dataset.from_tensor_slices(
                 (x_test, y_test, w_test))
             validata = validata.batch(len(x_test))
